@@ -1,0 +1,3126 @@
+---
+title: "Survival_FL"
+author: "Gould, Katelyn"
+date: "9/12/2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+Kaplan–Meier provides a method for estimating the survival curve (non-parametric), the log rank test provides a statistical comparison of two groups, and Cox's proportional hazards model (semi-parametric) allows additional covariates to be included. Both of the latter two methods assume that the hazard ratio comparing two groups is constant over time [the ratio of the hazards for any two individuals is constant over time] To test this we use Kaplan Meier curves (parallel)
+
+Assumption of Proportional hazards is MET (from both graphical log(-log(S(t))) vs. t or log(t)  Schoenfeld residuals 
+
+Parametric survival modeling-
+t
+exponential
+lognormal
+gaussian
+
+https://www.emilyzabor.com/tutorials/survival_analysis_in_r_tutorial.html#Estimating_(x)-year_survival
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+install.packages("ggpubr")
+```
+
+```{r}
+library(readr)
+library(ggplot2)
+library(janitor)
+library(ggfortify)
+library(survival)
+library(dplyr)
+library(rms)
+library('survminer')
+library(tidyr)
+library(lubridate)
+library(broom)
+library(magrittr)
+library(ggpubr)
+library(cowplot)
+library(car)
+library(Rcpp)
+library(gtsummary)
+library(sm)
+library(ranger)
+
+
+```
+
+```{r}
+setwd("C:/Github/Orbicella_FL/Raw Data")
+library(readxl)
+#setwd()
+multistep_surv_orbi <- read_excel("C:/Github/Orbicella_FL/Raw Data/multistep_surv_orbi.xlsx")
+msdo<-multistep_surv_orbi
+View(msdo)
+#msdo<-read.csv("C:/Github/Orbicella_FL/R_dataOutput/msdo.csv")
+rightcensor_surv_orbi <- read_excel("C:/Github/Orbicella_FL/Raw Data/rightcensor_surv_orbi.xlsx")
+msdor<-rightcensor_surv_orbi
+Dataall <- read_excel("C:/Github/Orbicella_FL/Raw Data/Surv_RC.xlsx")
+
+
+```
+
+```{r}
+# review variables and class types
+str(msdo)
+###### Make age numeric and create levels for reef sites in lower case
+msdo$date<-as.Date(msdo$date, format ="%y/%m/%d")
+msdo$time1 <- as.numeric(msdo$time1)
+msdo$time2 <- as.numeric(msdo$time2)
+msdo$status<-as.numeric(msdo$status)
+msdo$site <- factor(msdo$site, 
+                     levels = c("Tennessee", "Cary", "Conch", "Looe"))
+msdo$genotype <- factor(msdo$genotype, 
+                     levels = c("A", "B", "C", "D"))
+msdo$ID<-factor(msdo$coralid)
+msdo$cat <- paste(msdo$site,msdo$genotype)
+msdo$cat<-factor(msdo$cat)
+msdo$boring<-factor(msdo$boring,
+                       levels= c("1", "0"))
+msdo$disease<-factor(msdo$disease,
+                       levels= c("1", "0"))
+msdo$bites<-as.numeric(msdo$bites)
+msdo$unhealthy<-factor(msdo$unhealthy,
+                       levels= c("1", "0"))
+msdo$algae<-as.numeric(msdo$algae)
+msdo$mortality<-as.numeric(msdo$mortality)
+msdo$tissuehealth<-as.numeric(msdo$tissuehealth)
+msdo$white<-as.numeric(msdo$white)
+msdo$pale<-as.numeric(msdo$pale)
+msdo$Monmean<-as.numeric(msdo$Monmean)
+
+#msdo$algaef<-factor(msdo$algae)
+str(msdo)
+
+# save
+#########
+write.csv(msdo,"C:/Github/Orbicella_FL/R_dataOutput/msdo.csv")
+
+
+
+```
+
+
+```{r}
+# review variables and class types
+str(msdor)
+###### Make age numeric and create levels for reef sites in lower case
+#msdor$time <- as.numeric(msdor$time)
+msdor$site <- factor(msdor$site, 
+                     levels = c("Tennessee", "Cary", "Conch", "Looe"))
+msdor$genotype <- factor(msdor$genotype, 
+                     levels = c("A", "B", "C", "D"))
+msdor$ID<-factor(msdor$ID)
+msdor$cat <- paste(msdor$site,msdor$genotype)
+msdor$cat<-factor(msdor$cat)
+
+str(msdor)
+
+# save
+#########
+write.csv(msdor,"C:/Github/Orbicella_FL/R_dataOutput/msdor.csv")
+msdor <- read.csv("C:/Github/Orbicella_FL/R_dataOutput/msdor.csv")
+
+```
+
+
+```{r}
+# review variables and class types
+str(Dataall)
+###### Make age numeric and create levels for reef sites in lower case
+#msdor$time <- as.numeric(Dataall$time)
+Dataall$site <- factor(Dataall$site, 
+                     levels = c("Tennessee", "Cary", "Conch", "Looe"))
+Dataall$genotype <- factor(Dataall$genotype, 
+                     levels = c("A", "B", "C", "D"))
+Dataall$ID<-factor(Dataall$ID)
+Dataall$cat <- paste(Dataall$site,Dataall$genotype)
+Dataall$cat<-factor(Dataall$cat)
+Dataall$algae<-as.numeric(Dataall$algae)
+Dataall$mortality<-as.numeric(Dataall$mortality)
+Dataall$tissuehealth<-as.numeric(Dataall$tissuehealth)
+Dataall$white<-as.numeric(Dataall$white)
+Dataall$pale<-as.numeric(Dataall$pale)
+Dataall$Monmean<-as.numeric(Dataall$Monmean)
+Dataall$boring<-factor(Dataall$boring,
+                       levels= c("1", "0"))
+Dataall$disease<-factor(Dataall$disease,
+                       levels= c("1", "0"))
+Dataall$unhealthy<-factor(Dataall$unhealthy,
+                       levels= c("1", "0"))
+Dataall$status<-as.numeric((Dataall$status))
+str(Dataall)
+
+# save
+#########
+write.csv(Dataall,"C:/Github/Orbicella_FL/R_dataOutput/Dataall.csv")
+#Dataall <- read.csv("C:/Github/Orbicella_FL/R_dataOutput/msdor.csv")
+
+
+```
+# using Surv to make fits and plot survival graphs
+non-parametric statistic Kapal-meier survival estimator
+```{r}
+
+msdoD<-subset(msdo, time2!="845")
+
+##########################
+#survival curve for all corals
+survS <- survfit(Surv(time1, time2 ,status)~1,data=msdoD)
+plot(survS) #Kaplan-Meier fit and plot
+summary(survS)
+
+survSr <- survfit(Surv(time,status)~1,data=msdor)
+plot(survSr) #Kaplan-Meier fit and plot
+summary(survSr)
+#survival curve for all corals
+survSr2 <- survfit(Surv(time,status)~1,data=Dataall)
+plot(survSr2) #Kaplan-Meier fit and plot
+summary(survSr2)
+
+DataallD<-subset(Dataall, time %in% c("111", "179", "314"))
+#write.csv(DataallD, "C:/Github/Orbicella_FL/Raw Data/DataalD.csv")
+
+#survival curve for all corals
+survSr2d <- survfit(Surv(time,status)~1,data=DataallD)
+plot(survSr2d) #Kaplan-Meier fit and plot
+summary(survSr2d)
+
+
+fSi <- survfit(Surv(time1, time2, status) ~site, data = msdoD)
+summary(fSi)
+plot(fSi) #Kaplan-Meier fit and plot
+#by genotype
+fg <- survfit(Surv(time1, time2, status) ~ genotype, data = msdoD)
+summary(fg)
+plot(fg) #Kaplan-Meier fit and plot
+##########################right censored data for comparison (same data set just set up as right censored)
+
+#by site
+fSir <- survfit(Surv(time, status) ~ site, data = msdor)
+summary(fSir)
+plot(fSir) #Kaplan-Meier fit and plot
+#by genotype
+fgr <- survfit(Surv(time, status) ~ genotype, data = msdor)
+summary(fgr)
+plot(fgr) #Kaplan-Meier fit and plot
+
+
+#by site
+fSir2 <- survfit(Surv(time, status) ~ site, data = Dataall)
+summary(fSir2)
+plot(fSir2) #Kaplan-Meier fit and plot
+#by genotype
+fgr2<- survfit(Surv(time, status) ~ genotype, data = Dataall)
+summary(fgr2)
+plot(fgr2) #Kaplan-Meier fit and plot
+
+#by cat
+fc2<- survfit(Surv(time, status) ~ cat, data = Dataall)
+summary(fc2)
+plot(fc2) #Kaplan-Meier fit and plot
+
+################ Dec
+#by site
+fSir2d <- survfit(Surv(time, status) ~ site, data = DataallD)
+summary(fSir2d)
+plot(fSir2d) #Kaplan-Meier fit and plot
+#by genotype
+# 75% Tenn
+#100% Conch looe and cary
+fgr2d<- survfit(Surv(time, status) ~ genotype, data = DataallD)
+summary(fgr2d)
+plot(fgr2d) #Kaplan-Meier fit and plot
+# B 93%
+# D 90%
+#by cat
+
+```
+
+Plotting 
+
+```{r}
+plot(survfit(Surv(time, status) ~ 1, data = lung), 
+     xlab = "Days", 
+     ylab = "Overall survival probability")
+
+
+plot(survfit(Surv(time1, time2, status) ~ 1, data = msdoD), 
+     xlab = "Days", 
+     ylab = "Overall survival probability")
+
+plot(survfit(Surv(time1, time2, status) ~ strata(site), data = msdoD), 
+     xlab = "Days", 
+     ylab = "Survival probability among sites")
+
+plot(survfit(Surv(time1, time2, status) ~ genotype, data = msdoD), 
+     xlab = "Days", 
+     ylab = "Survival probability among genotype")
+
+plot(survfit(Surv(time, status) ~ 1, data = msdor), 
+     xlab = "Days", 
+     ylab = "Overall survival probability")
+
+plot(survfit(Surv(time, status) ~ site, data = msdor), 
+     xlab = "Days", 
+     ylab = "Survival probability among sites")
+
+plot(survfit(Surv(time, status) ~ genotype, data = msdor), 
+     xlab = "Days", 
+     ylab = "Survival probability among genotype")
+
+plot(survfit(Surv(time, status) ~ 1, data = DataallD), 
+     xlab = "Days", 
+     ylab = "Overall survival probability")
+
+plot(survfit(Surv(time, status) ~ site, data = DataallD), 
+     xlab = "Days", 
+     ylab = "Survival probability among sites")
+
+plot(survfit(Surv(time, status) ~ genotype, data = DataallD), 
+     xlab = "Days", 
+     ylab = "Survival probability among genotype")
+
+```
+
+Kaplan-Meier plots
+```{r}
+ggsurvplot(
+    fit = survfit(Surv(time, status) ~ 1, data = lung), 
+    xlab = "Days", 
+    ylab = "Overall survival probability")
+
+ggsurvplot(
+    fit = survfit(Surv(time1, time2, status) ~ 1, data = msdoD), 
+    xlab = "Days", 
+    ylab = "Overall survival probability")
+
+ggsurvplot(
+    fit = survfit(Surv(time1, time2, status) ~ site, data = msdoD), 
+    xlab = "Days", 
+    ylab = "Survival probability among site")
+
+ggsurvplot(
+    fit = survfit(Surv(time1, time2, status) ~ genotype, data = msdoD), 
+    xlab = "Days", 
+    ylab = "Survival probability among genotype")
+
+ggsurvplot(fit=survfit(Surv(time, status) ~ 1, data = msdor), 
+     xlab = "Days", 
+     ylab = "Overall survival probability")
+
+ggsurvplot(fit =survfit(Surv(time, status) ~ site, data = msdor), 
+     xlab = "Days", 
+     ylab = "Survival probability among site")
+
+ggsurvplot(fit=survfit(Surv(time, status) ~ genotype, data = msdor), 
+     xlab = "Days", 
+     ylab = "Survival probability among genotype")
+
+ggsurvplot(fit=survfit(Surv(time, status) ~ 1, data = DataallD), 
+     xlab = "Days", 
+     ylab = "Overall survival probability")
+
+ggsurvplot(fit =survfit(Surv(time, status) ~ site, data = DataallD), 
+     xlab = "Days", 
+     ylab = "Survival probability among site")
+
+ggsurvplot(fit=survfit(Surv(time, status) ~ genotype, data = DataallD), 
+     xlab = "Days", 
+     ylab = "Survival probability among genotype")
+
+```
+Dont use
+```{r}
+setwd("C:/Github/Orbicella_FL/Graphs/survival")
+theme_set(theme_classic())
+
+
+survS 
+survplotframe <- data.frame(time=c(0,survS$time),surv=c(1,survS$surv),
+                            upper=c(1,survS$upper),lower=c(1,survS$lower),
+                            censor=c(0,survS$n.censor))
+
+survplot <- ggplot(survplotframe,aes(x=time,y=surv))
+
+
+Allsurvival<-survplot+geom_step()+geom_step(aes(y=upper),linetype=2)+
+    geom_step(aes(y=lower),linetype=2)+
+    geom_point(data=survplotframe[survplotframe$censor>0,],shape=5,size=4)+
+    labs(x="Time (Days)",y="Estimated survival")
+
+
+Allsurvival
+ggexport(Allsurvival, filename = "Allsurvivalms.pdf")
+
+
+# estimated survival of all corals. Diamonds are censoring time points, and dotted lines are 95% CI
+survSr 
+
+survplotframer <- data.frame(time=c(0,survSr$time),surv=c(1,survSr$surv),
+                            upper=c(1,survSr$upper),lower=c(1,survSr$lower),
+                            censor=c(0,survSr$n.censor))
+
+survplot <- ggplot(survplotframer,aes(x=time,y=surv))
+
+survplot+geom_step()+geom_step(aes(y=upper),linetype=2)+
+    geom_step(aes(y=lower),linetype=2)+
+    geom_point(data=survplotframer[survplotframer$censor>0,],shape=5,size=4)+
+    labs(x="Time (Days)",y="Estimated survival")
+
+fSi 
+survplotframe2 <- data.frame(time=c(0,fSi$time),surv=c(1,fSi$surv), 
+                             upper=c(1,fSi$upper),lower=c(1,fSi$lower),
+                            censor=c(0,fSi$n.censor))
+
+survplot2 <- ggplot(survplotframe2,aes(x=time,y=surv))
+
+Sitesurvival<-survplot2+
+  geom_step()+
+  geom_step(aes(y=upper),linetype=2)+
+  geom_step(aes(y=lower),linetype=2)+
+  geom_point(data=survplotframe2[survplotframe2$censor>0,],shape=5,size=4)+
+  labs(x="Time (Days)",y="Estimated Survival")
+Sitesurvival
+
+ggexport(Sitesurvival, filename = "Sitesurvivalms.pdf")
+
+
+###########################
+
+fSir
+survplotframe2r <- data.frame(time=c(0,fSir$time),surv=c(1,fSir$surv),
+                              upper=c(1,fSir$upper),lower=c(1,fSir$lower),
+                            censor=c(0,fSir$n.censor))
+
+survplot2 <- ggplot(survplotframe2r,aes(x=time,y=surv))
+
+survplot2+geom_step()+geom_step(aes(y=upper),linetype=2)+
+    geom_step(aes(y=lower),linetype=2)+
+    geom_point(data=survplotframe2r[survplotframe2r$censor>0,],shape=5,size=4)+
+    labs(x="Time (Days)",y="Estimated Survival")
+
+summary(fg)
+survplotframeg <- data.frame(time=c(0,fg$time),surv=c(1,fg$surv),               
+                             upper=c(1,fg$upper),lower=c(1,fg$lower),
+                            censor=c(0,fg$n.censor))
+
+survplot2 <- ggplot(survplotframeg,aes(x=time,y=surv))
+
+Genosurvival<-survplot2+geom_step()+geom_step(aes(y=upper),linetype=2)+
+    geom_step(aes(y=lower),linetype=2)+
+    geom_point(data=survplotframeg[survplotframeg$censor>0,],shape=5,size=4)+
+    labs(x="Time (Days)",y="Estimated Survival")
+Genosurvival
+ggexport(Genosurvival, filename = "Genosurvivalms.pdf")
+
+```
+Dont use
+```{r}
+survSr2
+
+survplotframe <- data.frame(time=c(0,survSr2$time),surv=c(1,survSr2$surv),
+                            upper=c(1,survSr2$upper),lower=c(1,survSr2$lower),
+                            censor=c(0,survSr2$n.censor))
+
+survplot <- ggplot(survplotframe,aes(x=time,y=surv))
+
+
+Allsurvival<-survplot+geom_step()+geom_step(aes(y=upper),linetype=2)+
+    geom_step(aes(y=lower),linetype=2)+
+    geom_point(data=survplotframe[survplotframe$censor>0,],shape=5,size=4)+
+    labs(x="Time (Days)",y="Estimated survival")
+
+
+Allsurvival
+ggexport(Allsurvival, filename = "AllsurvivalRC.pdf")
+
+
+
+
+fSir2 
+survplotframe2 <- data.frame(time=c(0,fSir2$time),surv=c(1,fSir2$surv), 
+                             upper=c(1,fSir2$upper),lower=c(1,fSir2$lower),
+                            censor=c(0,fSir2$n.censor))
+
+survplot2 <- ggplot(survplotframe2,aes(x=time,y=surv))
+
+Sitesurvival<-survplot2+
+  geom_step()+
+  geom_step(aes(y=upper),linetype=2)+
+  geom_step(aes(y=lower),linetype=2)+
+  geom_point(data=survplotframe2[survplotframe2$censor>0,],shape=5,size=4)+
+  labs(x="Time (Days)",y="Estimated Survival")
+Sitesurvival
+
+ggexport(Sitesurvival, filename = "SitesurvivalRC2.pdf")
+
+
+###########################
+
+fgr2
+survplotframeg <- data.frame(time=c(0,fgr2$time),surv=c(1,fgr2$surv),               
+                             upper=c(1,fgr2$upper),lower=c(1,fgr2$lower),
+                            censor=c(0,fgr2$n.censor))
+
+survplot2 <- ggplot(survplotframeg,aes(x=time,y=surv))
+
+Genosurvival<-survplot2+geom_step()+geom_step(aes(y=upper),linetype=2)+
+    geom_step(aes(y=lower),linetype=2)+
+    geom_point(data=survplotframeg[survplotframeg$censor>0,],shape=5,size=4)+
+    labs(x="Time (Days)",y="Estimated Survival")
+Genosurvival
+ggexport(Genosurvival, filename = "GenosurvivalRC.pdf")
+
+#############################
+fgr2
+survplotframeg <- data.frame(time=c(0,fgr2$time),surv=c(1,fgr2$surv),               
+                             upper=c(1,fgr2$upper),lower=c(1,fgr2$lower),
+                            censor=c(0,fgr2$n.censor))
+
+survplot2 <- ggplot(survplotframeg,aes(x=time,y=surv))
+
+Genosurvival<-survplot2+geom_step()+geom_step(aes(y=upper),linetype=2)+
+    geom_step(aes(y=lower),linetype=2)+
+    geom_point(data=survplotframeg[survplotframeg$censor>0,],shape=5,size=4)+
+    labs(x="Time (Days)",y="Estimated Survival")
+Genosurvival
+ggexport(Genosurvival, filename = "GenosurvivalRC.pdf")
+#############################
+fc2
+survplotframeg <- data.frame(time=c(0,fc2$time),surv=c(1,fc2$surv),               
+                             upper=c(1,fc2$upper),lower=c(1,fc2$lower),
+                            censor=c(0,fc2$n.censor))
+
+survplot2 <- ggplot(survplotframeg,aes(x=time,y=surv))
+
+catsurvival<-survplot2+geom_step()+geom_step(aes(y=upper),linetype=2)+
+    geom_step(aes(y=lower),linetype=2)+
+    geom_point(data=survplotframeg[survplotframeg$censor>0,],shape=5,size=4)+
+    labs(x="Time (Days)",y="Estimated Survival")
+catsurvival
+ggexport(catsurvival, filename = "catsurvivalRC.pdf")
+fc2
+```
+
+```{r}
+setwd("C:/Github/Orbicella_FL/Graphs/survival/Dec")
+survSr2d
+
+
+survplotframe <- data.frame(time=c(0,survSr2d$time),surv=c(1,survSr2d$surv),
+                            upper=c(1,survSr2d$upper),lower=c(1,survSr2d$lower),
+                            censor=c(0,survSr2d$n.censor))
+
+survplot <- ggplot(survplotframe,aes(x=time,y=surv))
+
+
+Allsurvival<-survplot+geom_step()+geom_step(aes(y=upper),linetype=2)+
+    geom_step(aes(y=lower),linetype=2)+
+    geom_point(data=survplotframe[survplotframe$censor>0,],shape=5,size=4)+
+    labs(x="Time (Days)",y="Estimated survival")
+
+
+Allsurvival
+ggexport(Allsurvival, filename = "AllsurvivalRCDec.pdf")
+
+
+
+list(survfit(Surv(time, status) ~ 1, DataallD))%>%
+tbl_survfit(times = c(111, 179,314),
+label_header = "**{time} Days**") %>%
+add_p()
+#############################
+
+fSir2d
+survplotframe2 <- data.frame(time=c(0,fSir2d$time),surv=c(1,fSir2d$surv), 
+                             upper=c(1,fSir2d$upper),lower=c(1,fSir2d$lower),
+                            censor=c(0,fSir2d$n.censor))
+
+survplot2 <- ggplot(survplotframe2,aes(x=time,y=surv))
+
+Sitesurvival<-survplot2+
+  geom_step()+
+  geom_step(aes(y=upper),linetype=2)+
+  geom_step(aes(y=lower),linetype=2)+
+  geom_point(data=survplotframe2[survplotframe2$censor>0,],shape=5,size=4)+
+  labs(x="Time (Days)",y="Estimated Survival")
+Sitesurvival
+
+ggexport(Sitesurvival, filename = "SitesurvivalRC2.pdf")
+
+list(survfit(Surv(time, status) ~ site, DataallD))%>%
+tbl_survfit(times = c(111, 179,314),
+label_header = "**{time} Days**") %>%
+add_p()
+#############################
+
+fgr2d
+survplotframeg <- data.frame(time=c(0,fgr2d$time),surv=c(1,fgr2d$surv),               
+                             upper=c(1,fgr2d$upper),lower=c(1,fgr2d$lower),
+                            censor=c(0,fgr2d$n.censor))
+
+survplot2 <- ggplot(survplotframeg,aes(x=time,y=surv))
+
+Genosurvival<-survplot2+geom_step()+geom_step(aes(y=upper),linetype=2)+
+    geom_step(aes(y=lower),linetype=2)+
+    geom_point(data=survplotframeg[survplotframeg$censor>0,],shape=5,size=4)+
+    labs(x="Time (Days)",y="Estimated Survival")
+Genosurvival
+ggexport(Genosurvival, filename = "GenosurvivalRC.pdf")
+
+list(survfit(Surv(time, status) ~ genotype, DataallD))%>%
+tbl_survfit(times = c(111, 179,314),
+label_header = "**{time} Days**") %>%
+add_p()
+
+#############################
+
+fc2d
+survplotframeg <- data.frame(time=c(0,fc2d$time),surv=c(1,fc2d$surv),               
+                             upper=c(1,fc2d$upper),lower=c(1,fc2d$lower),
+                            censor=c(0,fc2d$n.censor))
+
+survplot2 <- ggplot(survplotframeg,aes(x=time,y=surv))
+
+catsurvival<-survplot2+geom_step()+geom_step(aes(y=upper),linetype=2)+
+    geom_step(aes(y=lower),linetype=2)+
+    geom_point(data=survplotframeg[survplotframeg$censor>0,],shape=5,size=4)+
+    labs(x="Time (Days)",y="Estimated Survival")
+catsurvival
+ggexport(catsurvival, filename = "catsurvivalRCDEC.pdf")
+
+```
+
+
+We can produce nice tables of x-time survival probability estimates using the tbl_survfit() function from the {gtsummary} package:
+```{r}
+
+list(survfit(Surv(time, status) ~ site+cluster(ID), DataallD),
+survfit(Surv(time, status) ~ genotype+cluster(ID), DataallD),
+survfit(Surv(time, status) ~ cat+cluster(ID), DataallD),
+survfit(Surv(time, status) ~ 1, DataallD))%>%
+tbl_survfit(times = c(111, 179,314),
+label_header = "**{time} Days**") 
+
+list(survfit(Surv(time, status) ~ ID, DataallD))%>%
+tbl_survfit(times = c(111, 179,314),
+label_header = "**{time} Days**") %>%
+add_p()
+#################################################
+
+
+#################################unhealthy+ algae+ mortality+ tissuehealth
+list(survfit(Surv(time1, time2, status) ~ unhealthy+ cluster(coralid), data = msdoD),
+     survfit(Surv(time1, time2, status) ~ algae, data = msdoD), #algae presences does not have an effect on survival
+     survfit(Surv(time1, time2, status) ~ mortality, data = msdoD), #% mortality does not have an effect on survival
+     survfit(Surv(time1, time2, status) ~ tissuehealth, data = msdoD), #% healthy tissue doesn't have an effect on survival
+survfit(Surv(time1, time2, status) ~ disease +cluster(coralid), msdoD))%>% 
+  tbl_survfit(
+    times = c(111, 179,314),
+    label_header = "**{time} Days**")
+# all disease occured only at 111 days 
+
+survfit(Surv(time1, time2, status) ~ 1, data = msdoD) %>% 
+  tbl_survfit(
+    times = c(111, 179,314),
+    label_header = "**{time} Days**")
+
+survfit(Surv(time, status) ~ 1, data = DataallD) %>% 
+  tbl_survfit(
+    times = c(111, 179,314),
+    label_header = "**{time} Days**")
+# 92% and 96% with Right censored data 
+
+
+survfit(Surv(time, status) ~ site+cluster(ID), data = DataallD) %>% 
+  tbl_survfit(
+    times = c(111, 179,314, 845),
+    label_header = "**{time} Days**")
+
+survfit(Surv(time, status) ~ cat+cluster(ID), data = DataallD) %>% 
+  tbl_survfit(
+    times =  c(111, 179,314, 845),
+    label_header = "**{time} Days**")
+
+```
+
+
+Comparing survival times between groups
+We can conduct between-group significance tests using a log-rank test
+The log-rank test equally weights observations over the entire follow-up time and is the most common way to compare survival times between groups
+There are versions that more heavily weight the early or late follow-up that could be more appropriate depending on the research question (see ?survdiff for different test options)
+We get the log-rank p-value using the survdiff function. For example, we can test whether there was a difference in survival time according to sex in the lung data
+```{r}
+#right censored data only DataallD
+survdiff(Surv(time, status) ~ sex, data = lung)
+
+survdiff(Surv(time, status) ~ site, data = DataallD)
+#Chisq= 26.5  on 3 degrees of freedom, p= 7e-06
+#tenn
+library("coin")
+logrank_test(Surv(time, status) ~ site, data = DataallD, distribution = "exact")
+
+
+survdiff(Surv(time, status) ~ genotype, data = DataallD)
+#Chisq= 5.5  on 3 degrees of freedom, p= 0.1
+survdiff(Surv(time, status) ~ site+genotype, data = DataallD)
+# Chisq= 62  on 15 degrees of freedom, p= 1e-07
+survdiff(Surv(time, status) ~ cat, data = DataallD)
+# Chisq= 62  on 15 degrees of freedom, p= 1e-07
+#Tenn B and Tenn D
+
+DFD <- within(DataallD, site <- relevel(site, ref = 3))
+survdiff(Surv(time, status) ~ site, data = DFD)
+#Chisq= 26.5  on 3 degrees of freedom, p= 7e-06
+
+```
+
+The Cox regression model
+We may want to quantify an effect size for a single variable, or include more than one variable into a regression model to account for the effects of multiple variables.
+
+The Cox regression model is a semi-parametric model that can be used to fit univariable and multivariable regression models that have survival outcomes.
+
+CPH model is one type of regression model which is commonly used in biological phenomena for investigating the association between the survival time of patients and one or more predictor variables
+
+Assessing proportional hazards
+One assumption of the Cox proportional hazards regression model is that the hazards are proportional at each point in time throughout follow-up. The cox.zph() function from the {survival} package allows us to check this assumption. It results in two main things:
+
+A hypothesis test of whether the effect of each covariate differs according to time, and a global test of all covariates at once.
+This is done by testing for an interaction effect between the covariate and log(time)
+A significant p-value indicates that the proportional hazards assumption is violated
+Plots of the Schoenfeld residuals
+Deviation from a zero-slope line is evidence that the proportional hazards assumption is violated
+
+```{r}
+coxph(Surv(time, status) ~ sex, data = lung)
+
+coxph(Surv(time, status) ~ sex, data = lung)%>% 
+  tbl_regression(exp = TRUE) 
+
+#HR= instantaneous rate of occurrence of the event of interests in those who are STILL at risk. HR =59%
+ # to compare with conch the highest surviving reef
+################################################
+#Reef site
+DFD <- within(DataallD, site <- relevel(site, ref = 3))
+
+coxph(Surv(time, status) ~ site, data = DataallD)
+# NO diff in survival across sites 
+coxph(Surv(time, status) ~ genotype, data = DataallD)
+
+DFD <- within(DataallD, cat <- relevel(cat, ref = 14))
+
+coxph(Surv(time, status) ~ cat, data = DataallD)
+
+coxph(Surv(time, status) ~ site, data = DataallD)%>% 
+  tbl_regression(exp = TRUE) 
+
+################################################
+#Genotype
+coxph(Surv(time, status) ~ genotype, data = DFD)
+# NO diff in survival across genotypes 
+coxph(Surv(time, status) ~ genotype, data = DFD)%>% 
+  tbl_regression(exp = TRUE) 
+################################################
+DFD <- within(DataallD, genotype <- relevel(genotype, ref = 4))
+coxph(Surv(time, status) ~ genotype, data = DFD)
+#0.06614 No diff in survival across genotypes 
+coxph(Surv(time, status) ~ genotype, data = DFD)%>% 
+  tbl_regression(exp = TRUE) 
+################################################
+#Cat
+DFDc <- within(DataallD, cat <- relevel(cat, ref = 1))
+
+coxph(Surv(time, status) ~ cat, data = DFDc)
+# 0.02923 Global diff in survival across GxE 
+coxph(Surv(time, status) ~ cat, data = DFDc)%>% 
+  tbl_regression(exp = TRUE) 
+################################################
+
+coxph(Surv(time1, time2, status) ~ site+cluster(coralid), data = msdoD)%>% 
+  tbl_regression(exp = TRUE) 
+# all sites are more likely to live than Tennessee 0.001
+DFms <- within(msdoD, site <- relevel(site, ref = 3))
+
+scox<-coxph(Surv(time1, time2, status) ~ site+cluster(coralid), data = msdoD)
+summary(scox)
+coxph(Surv(time1, time2, status) ~ site+cluster(coralid), data = DFms)%>% 
+  tbl_regression(exp = TRUE) 
+# Tenn is MORE likely to die than conch
+gcox<-coxph(Surv(time1, time2, status) ~ genotype+cluster(coralid), data = msdoD)
+summary(gcox)
+coxph(Surv(time1, time2, status) ~ genotype+cluster(coralid), data = msdoD)%>% 
+  tbl_regression(exp = TRUE) 
+# B and D are more likely to die than A and C 0.001
+##########################################################
+covariates <- c("site", "genotype",  "algae", "mortality",  "white", "pale","tissuehealth")
+
+univ_formulas <- sapply(covariates,
+                        function(x) as.formula(paste('Surv(time, status)~', x)))
+
+univ_models <- lapply( univ_formulas, function(x){coxph(x, data = DataallD)})
+
+# Extract data 
+univ_results <- lapply(univ_models,
+                       function(x){ 
+                          x <- summary(x)
+                          p.value<-signif(x$wald["pvalue"], digits=2)
+                          wald.test<-signif(x$wald["test"], digits=2)
+                          beta<-signif(x$coef[1], digits=2);#coeficient beta
+                          HR <-signif(x$coef[2], digits=2);#exp(beta)
+                          HR.confint.lower <- signif(x$conf.int[,"lower .95"], 2)
+                          HR.confint.upper <- signif(x$conf.int[,"upper .95"],2)
+                          HR <- paste0(HR, " (", 
+                                       HR.confint.lower, "-", HR.confint.upper, ")")
+                          res<-c(beta, HR, wald.test, p.value)
+                          names(res)<-c("beta", "HR (95% CI for HR)", "wald.test", 
+                                        "p.value")
+                          return(res)
+                          #return(exp(cbind(coef(x),confint(x))))
+                         })
+res <- t(as.data.frame(univ_results, check.names = FALSE))
+as.data.frame(res)
+
+
+#                  beta HR (95% CI for HR) wald.test p.value
+#unhealthy           22    5.2e+09 (0-Inf)         0       1
+#perc_white_tissue -3.6      0.027 (0-Inf)         0       1
+#perc_pale_tissue  <NA>         NA (NA-NA)         0       1
+#blotchy           <NA>         NA (NA-NA)         0       1
+#diseased          <NA>         NA (NA-NA)         0       1
+#no_fish_bite       -17    3.9e-08 (0-Inf)         0       1
+
+
+DFms <- within(msdoD, genotype <- relevel(genotype, ref = 3))
+coxph(Surv(time1, time2, status) ~ genotype+cluster(coralid), data = DFms)%>% 
+  tbl_regression(exp = TRUE) 
+
+# B and D are more likely to die than c and A 0.001
+
+#21 times more death at looe than conch
+# Cary - significantly 0.06 times as many corals from cary are dying when compared to Tennessee
+# Looe-significantly 0.07 times as many corals from Looe are dying when compared to Tennessee
+#corals from Cary and Looe Key have a lower hazard of death than those from Tennessee
+#Tennessee and Cary when compared to Conch are not significantly different in hazard of death
+
+w<-coxph(Surv(time1, time2, status) ~ white, DFms) 
+w
+summary(w)
+cox.zph(w)
+d<-coxph(Surv(time1, time2, status) ~ disease, DFms) 
+d
+summary(d)
+cox.zph(d)
+h<-coxph(Surv(time1, time2, status) ~ tissuehealth, DFms) 
+h
+summary(h)
+#3e-06 Liklihood ratio
+cox.zph(h)
+plot(cox.zph(h))
+u<-coxph(Surv(time1, time2, status) ~ unhealthy, DFms) 
+u
+summary(u)
+#5e-4 likelihood ratio
+cox.zph(u)
+plot(cox.zph(u))
+a<-coxph(Surv(time1, time2, status) ~ algae, DFms) 
+a
+summary(a)
+#2e-09 likelihood ratio
+cox.zph(a)
+plot(cox.zph(a))
+m<-coxph(Surv(time1, time2, status) ~ mortality, DFms) 
+m
+summary(m)
+#2e-09 likelihood ratio
+cox.zph(m)
+plot(cox.zph(m))
+p<-coxph(Surv(time1, time2, status) ~ pale, DFms) 
+p
+summary(p)
+cox.zph(p)
+plot(cox.zph(p))
+
+
+#Tissue health, unhealthy, algae, and mortality
+##################################################################
+msdoD <- within(msdoD, site <- relevel(site, ref =3))
+msdoD <- within(msdoD, genotype <-relevel(genotype, ref = 3))
+#site", "genotype",  "algae", "mortality",  "white", "pale","tissuehealth"
+#unhealthy
+
+cfitall<-coxph(Surv(time1, time2, status) ~ site +genotype+algae+cluster(ID), data = msdoD)
+cfitall
+summary(cfitall)
+#cfitalld<-coxph(Surv(time, status) ~ site +genotype+algae+cluster(ID), data = DataallD)
+#cfitalld
+#                coef  exp(coef)   se(coef)  robust se     z        p
+#siteConch -5.866e-01  5.562e-01  0.000e+00  0.000e+00  -Inf  < 2e-16*
+#siteCary  -4.684e-01  6.260e-01  0.000e+00  0.000e+00  -Inf  < 2e-16*
+#siteLooe  -4.711e-01  6.243e-01  0.000e+00  0.000e+00  -Inf  < 2e-16*
+#genotypeD  5.845e+00  3.455e+02  9.072e+03  1.942e+00 3.009  0.00262*
+#genotypeC  2.725e+00  1.526e+01  5.239e+05  1.808e+00 1.508  0.13163
+#genotypeB  5.845e+00  3.455e+02  9.072e+03  1.942e+00 3.009  0.00262*
+#algae      3.003e-01  1.350e+00  2.950e+02  3.869e-02 7.762 8.36e-15
+#
+#Likelihood ratio test=36.14  on 7 df, p=6.833e-06
+#n= 231, number of events= 5 
+#   (9 observations deleted due to missingness)
+summary (cfitall)
+
+coxph(Surv(time1, time2, status) ~ site +genotype+algae+cluster(ID), data = msdoD)%>% 
+  tbl_regression(exp = TRUE) 
+
+cfitall<-coxph(Surv(time1, time2, status) ~ site +genotype+unhealthy+ algae+ mortality+ tissuehealth+cluster(ID), data = msdoD)
+cfitall
+#0.0099661 likelihood ratio
+#algae 1.70e-06
+summary(cfitall)
+# WALD 2e-16
+#Likelihood 0.01
+#Algae significant 
+#The hazard ratio differs from the relative risk and odds ratio. The hazard ratio represents the difference in the isk of an event at any given time, whereas the relative risk or odds ratio usually represents the cumulative risk ver a period of time
+
+
+#HAzard rates Vary significantly between conch and Looe
+cfita<-coxph(Surv(time1, time2, status) ~ site+algae+cluster(ID), data = msdoD)
+summary(cfita)
+cfitas<-coxph(Surv(time1, time2, status) ~ site+genotype+algae+cluster(ID), data = msdoD)
+summary(cfitas)
+cfitac<-coxph(Surv(time1, time2, status) ~ cat+algae+cluster(ID), data = msdoD)%>% 
+  tbl_regression(exp = TRUE) 
+summary(cfitac)
+coxph(Surv(time1, time2, status) ~ algae+cluster(ID), data = msdoD)%>% 
+  tbl_regression(exp = TRUE) 
+# Cary A did better than Conch C--- this is where the variation in survival and HR comes from (missing C's)
+# Algae 2e-16
+#Conch C 2e-16
+#TEnn A 7.39e-10
+#0.003 Likelihood
+
+cfits<-coxph(Surv(time1, time2, status) ~ site+cluster(ID), data = msdoD)
+cfits
+#Likelihood ratio test=14.32  on 3 df, p=0.0025
+#n= 231, number of events= 5 
+summary(cfits)
+#Tenn 2e-16
+#WALD  2e-16
+#Likelihood 0.002
+plot(survfit(cfits))
+
+coxph(Surv(time1, time2, status) ~ genotype+cluster(ID), data = msdoD)%>% 
+  tbl_regression(exp = TRUE) 
+#C differs from B and D- Same as A
+
+cfitg<-coxph(Surv(time1, time2, status) ~ genotype+cluster(ID), data = msdoD)
+#Likelihood ratio test=4.72  on 3 df, p=0.06947
+#n= 272, number of events= 34
+cfitg
+summary(cfitg)
+#WALD  2e-16
+#likelihood 0.07
+plot(survfit(cfitg))
+
+coxph(Surv(time1, time2, status) ~ site+genotype+cluster(ID), data = msdoD)%>% 
+  tbl_regression(exp = TRUE) 
+
+cfiti<-coxph(Surv(time1, time2, status) ~ site +genotype+cluster(ID), data = msdoD)
+#Likelihood ratio test=27.69  on 6 df, p=0.0001075
+#n= 272, number of events= 34
+#siteLooe      -1.5380    0.2148   0.4536 -3.390 0.000698
+cfiti
+#Tenn B and D
+summary(cfiti)
+#WALD 2e-16
+#likelihood 0.001
+plot(survfit(cfiti))
+stats::step(cfiti)
+
+#############################################
+
+AIC(cfiti,cfits,cfitg,cfita,cfitas,cfitac)
+# cfits is the best  model
+
+#############################################
+#### Assessing proportional hazards
+#p-values >0.05, we do not reject the null hypothesis, and conclude that the proportional hazards assumption is satisfied for each individual covariate, and also for the model overall.
+
+### Erro hazards are not proportional
+cox.zph(cfits)
+cox.zph(cfiti)
+cox.zph(cfitg)
+
+
+#Plots of the Schoenfeld residuals
+#Deviation from a zero-slope line is evidence that the proportional hazards assumption is violated
+DataallD <- within(DataallD, site <- relevel(site, ref = 3))
+
+cfitsr<-coxph(Surv(time, status) ~ site +cluster(ID), data = DataallD)
+#Likelihood ratio test=17.22  on 3 df, p=0.0006372
+#n= 64, number of events= 25
+cfitsr
+summary(cfitsr)
+#3e-04 Likelihood
+#Tenn
+plot(survfit(cfitsr))
+
+cfitgr<-coxph(Surv(time, status) ~ genotype+cluster(ID), data = DataallD)
+#Likelihood ratio test=2  on 3 df, p=0.5714
+#n= 64, number of events= 25
+cfitgr
+summary(cfitgr)
+#Likelihood 0.07
+plot(survfit(cfitgr))
+
+cfitir<-coxph(Surv(time, status) ~ site + genotype+cluster(ID), data = DataallD)
+#Likelihood ratio test=19.17  on 6 df, p=0.003887
+#n= 64, number of events= 25
+cfitir
+#0.0001486
+summary(cfitir)
+# likelihood 1e-04
+plot(survfit(cfitir))
+
+cox.zph(cfitir)
+cox.zph(cfitsr)
+cox.zph(cfitgr)
+AIC(cfitir,cfitsr,cfitgr)
+#cfitir   is the best model for right censored data  (same as msdoD)
+
+```
+All sites differ from Tenn
+and A and C genotypes are more likely to survive than B and D
+
+The quantity of interest from a Cox regression model is a hazard ratio (HR). The HR represents the ratio of hazards between two groups at any particular point in time.
+A HR < 1 indicates reduced hazard of death whereas a HR > 1 indicates an increased hazard of death.
+
+
+https://rviews.rstudio.com/2017/09/25/survival-analysis-with-r/
+
+ranger() builds a model for each observation in the data set. The next block of code builds the model using the same variables used in the Cox model above, and plots twenty random curves, along with a curve that represents the global average for all of the patients. Note that I am using plain old base R graphics here.
+```{r}
+fit4s <- survfit(Surv(time1, time2, status) ~ site+cluster(coralid), data = msdoD) #you will get NA for median survival if there is still more than 50% survival in a group at the last time point
+ggsurvplot(data = msdoD, 
+           fit = fit4s,
+           xlab = "Days",
+           fun = "cumhaz",
+           legend.title = "",
+           legend = "bottom", 
+           risk.table = TRUE,
+           risk.table.y.text = FALSE)
+#coxfit
+cox<-coxph(Surv(time,status)~site+genotype, data=DataallD)
+cox_fit<-survfit(cox)
+autoplot(cox_fit)
+#KMfit
+km_fit <- survfit(Surv(time, status) ~ site+genotype+cluster(ID), data = DataallD)
+
+
+
+#ranger model
+r_fits <- ranger(Surv(time, status) ~ site+genotype,
+                     data = DataallD,
+                     mtry = 2,
+                     importance = "permutation",
+                     splitrule = "extratrees",
+                     verbose = TRUE)
+# Average the survival models
+death_times <- r_fits$unique.death.times 
+surv_prob <- data.frame(r_fits$survival)
+avg_prob <- sapply(surv_prob,mean)
+
+# Plot the survival models for each patient
+plot(r_fits$unique.death.times,r_fits$survival[1,], 
+     type = "l", 
+     ylim = c(0,1),
+     col = "red",
+     xlab = "Days",
+     ylab = "survival",
+     main = "Coral Survival Curves")
+
+cols <- colors()
+for (n in sample(c(2:dim(msdor)[1]), 20)){
+  lines(r_fits$unique.death.times, r_fits$survival[n,], type = "l", col = cols[n])
+}
+lines(death_times, avg_prob, lwd = 2)
+legend(500, 0.2, legend = c('Mean Survival = black'))
+
+vi <- data.frame(sort(round(r_fits$variable.importance, 4), decreasing = TRUE))
+names(vi) <- "importance"
+head(vi)
+
+# for more than one variable site +genotype
+cat("Prediction Error = 1 - Harrell's c-index = ", r_fits$prediction.error)
+
+#Prediction Error = 1 - Harrell's c-index =  0.5948905
+# Set up for ggplot
+kmi <- rep("KM",length(km_fit$time))
+km_df <- data.frame(km_fit$time,km_fit$surv,kmi)
+names(km_df) <- c("Time","Surv","Model")
+
+coxi<- rep("Cox",length(cox_fit$time))
+cox_df <- data.frame(cox_fit$time,cox_fit$surv,coxi)
+names(cox_df) <- c("Time","Surv","Model")
+
+rfi<- rep("RF",length(r_fits$unique.death.times))
+rf_df <- data.frame(r_fits$unique.death.times,avg_prob,rfi)
+names(rf_df) <- c("Time","Surv","Model")
+
+plot_df <- rbind(km_df,cox_df,rf_df)
+
+p <- ggplot(plot_df, aes(x = Time, y = Surv, color = Model))
+p + geom_line()
+
+
+###### Ranger model
+
+
+# does compute Harrell’s c-index (See [8] p. 370 for the definition), which is similar to the Concordance statistic described above. This is a generalization of the ROC curve, which reduces to the Wilcoxon-Mann-Whitney statistic for binary variables, which in turn, is equivalent to computing the area under the ROC curve.
+#Finally, to provide an “eyeball comparison” of the three survival curves, I’ll plot them on the same graph.The following code pulls out the survival data from the three model objects and puts them into a data frame for ggplot().
+
+
+
+###### #ranger model
+r_fits <- ranger(Surv(time, status) ~ site+genotype,
+                     data = DataallD,
+                     mtry = 2,
+                     importance = "permutation",
+                     splitrule = "extratrees",
+                     verbose = TRUE)
+
+
+fit4s <- ranger(Surv(time1, time2, status) ~ genotype, data = msdoD)
+ggsurvplot(data = msdoD, 
+           fit = fit4s,
+           xlab = "Days",
+           fun = "cumhaz",
+           legend.title = "",
+           legend = "bottom", 
+           risk.table = TRUE,
+           risk.table.y.text = FALSE)
+
+fitR <- ranger(Surv(time, status) ~  genotype, data = msdoD)
+
+ggsurvplot(fitR, data = msdoD,
+ surv.median.line = "hv",legend.title= "Genotype", pval= TRUE, conf.int =  TRUE,conf.int.style= "step",
+ risk.table= TRUE, risk.table.y.text = FALSE, ggtheme = theme_classic2())
+
+fit4s <- survfit(Surv(time1, time2, status) ~ site, data = msdoD)
+ggsurvplot(data = msdoD, 
+           fit = fit4s,
+           xlab = "Days",
+           fun = "cumhaz",
+           legend.title = "",
+           legend = "bottom", 
+           risk.table = TRUE,
+           risk.table.y.text = FALSE)
+
+fitR <- survfit(Surv(time, status) ~  site, data = DataallD)
+
+ggsurvplot(fitR, data = msdor,
+ surv.median.line = "hv",legend.title= "Site", pval= TRUE, conf.int =  TRUE,conf.int.style= "step",
+ risk.table= TRUE, risk.table.y.text = FALSE, ggtheme = theme_classic2())
+```
+
+
+
+```{r}
+
+#Calculate  
+lm_fits <- survfit(Surv(time1, time2, status) ~ site, data = msdoD)
+summary(lm_fits)
+lm_fitg <- survfit(Surv(time1, time2, status) ~ genotype, data = msdoD)
+summary(lm_fitg)
+lm_fitc <- survfit(Surv(time1, time2, status) ~ site+genotype, data = msdoD)
+summary(lm_fitc)
+```
+
+
+```{r}
+
+fitall <- survfit(Surv(time, status) ~1, data = DataallD)
+
+ggsurvplot(
+  fit = fitall, 
+  data = msdor,
+  title    = "Survival curves",
+  subtitle = "Based on Kaplan-Meier estimates",
+  size= 1.5,
+  xlab = "Days from Transplantation",
+   xscale = 1,
+  break.x.by = 50,
+  legend.title= "",
+  legend = "right",
+    #ncensor.plot = TRUE,
+  #ncensor.plot.height = 0.35,
+  risk.table = TRUE,
+   risk.table.col = "strata",# Risk table color by groups
+  #legend.labs= c("Tennessee A","Tennessee B", "Tennessee C", "Tennessee D", "Cary A", "Cary B", "Cary C", "Cary D", "Conch A", "Conch B", "Conch C", "Conch D", "Looe A", "Looe B", "Looe C", "Looe D"),
+  #risk.table.y.text = FALSE,
+  risk.table.height = 0.4,
+  pval = TRUE
+)
+
+fitright <- survfit(Surv(time, status) ~   site+genotype, data = msdor)
+
+ggsurvplot(
+  fit = fitright, 
+  data = msdor,
+  title    = "Survival curves",
+  subtitle = "Based on Kaplan-Meier estimates",
+  size= 1.5,
+  xlab = "Days from Transplantation",
+   xscale = 1,
+  break.x.by = 50,
+  legend.title= "Site+Genotype",
+  legend = "right",
+    #ncensor.plot = TRUE,
+  #ncensor.plot.height = 0.35,
+  risk.table = TRUE,
+   risk.table.col = "strata",# Risk table color by groups
+  legend.labs= c("Tennessee A","Tennessee B", "Tennessee C", "Tennessee D", "Cary A", "Cary B", "Cary C", "Cary D", "Conch A", "Conch B", "Conch C", "Conch D", "Looe A", "Looe B", "Looe C", "Looe D"),
+  #risk.table.y.text = FALSE,
+  risk.table.height = 0.4,
+  pval = TRUE
+)
+#0.0014
+ggsurvplot(
+  fit = fitright, 
+  data = msdor,
+  conf.int = FALSE,
+  legend.title= "Site+Genotype",
+  legend.labs= c("Tennessee A","Tennessee B", "Tennessee C", "Tennessee D", "Cary A", "Cary B", "Cary C", "Cary D", "Conch A", "Conch B", "Conch C", "Conch D", "Looe A", "Looe B", "Looe C", "Looe D"),
+  xlab = "Days from Transplantation",
+   xscale = 1,
+  break.x.by = 50,
+  risk.table = FALSE,
+  risk.table.y.text = FALSE,
+  pval = TRUE
+)
+
+#################### site
+
+fitsright <- survfit(Surv(time, status) ~ site, data = msdor)
+
+
+ggsurvplot(
+  fit = fitsright, 
+  data = msdor,
+  title    = "Survival curves",
+  subtitle = "Based on Kaplan-Meier estimates",
+  size= 1.5,
+  xlab = "Days from Transplantation",
+   xscale = 1,
+  break.x.by = 50,
+  legend.title= "Site",
+   legend = "right",
+   #ncensor.plot = TRUE,
+  #ncensor.plot.height = 0.35,
+  risk.table = TRUE,
+   risk.table.col = "strata",# Risk table color by groups
+  legend.labs =
+    c("Tennessee", "Cary", "Conch", "Looe"),
+  #risk.table.y.text = FALSE,
+  risk.table.height = 0.35,
+  pval = TRUE
+)
+
+#0.0016 
+
+ggsurvplot(
+  fit = fitsright, 
+  data = msdor,
+  #surv.median.line = "hv",
+  conf.int = FALSE,
+  legend.title= "Site",
+  legend.labs= c("Tennessee", "Cary", "Conch", "Looe"),
+  xlab = "Days from Transplantation",
+   xscale = 1,
+  break.x.by = 50,
+  risk.table = FALSE,
+  risk.table.y.text = FALSE,
+  pval = TRUE
+)
+
+
+######### genotype
+
+fitgright <- survfit(Surv(time, status) ~ genotype, data = msdor)
+
+
+ggsurvplot(
+  fit = fitgright, 
+  data = msdor,
+  title    = "Survival curves",
+  subtitle = "Based on Kaplan-Meier estimates",
+  size= 1.5,
+  xlab = "Days from Transplantation",
+   xscale = 1,
+  break.x.by = 50,
+  legend.title= "Genotype",
+  legend= "right",
+   #ncensor.plot = TRUE,
+  #ncensor.plot.height = 0.35,
+  risk.table = TRUE,
+   risk.table.col = "strata",# Risk table color by groups
+  legend.labs =
+    c("A", "B", "C", "D"),
+  #risk.table.y.text = FALSE,
+  risk.table.height = 0.35,
+  pval = TRUE
+)
+#0.48 
+
+ggsurvplot(
+  fit = fitgright, 
+  data = msdor,
+  #surv.median.line = "hv",
+  conf.int = FALSE,
+  legend.title= "Genotype",
+  legend.labs= c("A", "B", "C", "D"),
+  xlab = "Days from Transplantation",
+   xscale = 1,
+  break.x.by = 50,
+  risk.table = FALSE,
+  risk.table.y.text = FALSE,
+  pval = TRUE
+)
+```
+
+Time-dependent covariate
+the value of a covariate is changing over time
+
+ Kaplan-Meier estimates with survfit (library Survival)
+ Make 3 models where survival varies with habitat type (reef) (KMr), genotype (KMg), and genotype:reef (KMi)
+ Kaplan-Meier curves and logrank tests - are examples of univariate analysis. They describe the survival according to one factor under investigation, but ignore the impact of any others
+```{r}
+KMr <- survfit(Surv(time1, time2,status)~site,data=msdoD)
+KMrr <- survfit(Surv(time,status)~site,data=DataallD)
+KM2 <- survfit(Surv(time1, time2,status)~genotype,data=msdoD)
+KM2r <- survfit(Surv(time,status)~genotype,data=DataallD)
+KMb <-survfit(Surv(time1, time2,status)~site+genotype,data=msdoD)
+KMbr <-survfit(Surv(time,status)~site+genotype,data=DataallD)
+KMc <-survfit(Surv(time1, time2,status)~cat,data=msdoD)
+KMcr <-survfit(Surv(time,status)~cat,data=DataallD)
+
+plot(KMr )
+plot(KMrr)
+plot(KM2 )
+plot(KM2r)
+plot(KMb )
+plot(KMbr)
+plot(KMc )
+plot(KMcr)
+summary(KMr)
+summary(KM2)
+summary(KMb)
+```
+
+
+Testing influential observations "outliers"
+```{r}
+#type = “dfbeta”, plots the estimated changes in the regression coefficients upon deleting each observation in turn; 
+#
+#fit
+#fits
+#fitg
+#fiti
+#fitin
+#fitu
+#fita
+#fitm
+#fitl
+#fitw
+#fitd
+#fitf
+#fitb
+#fitbs
+#fitrall
+#ggcoxdiagnostics(fit,type = "dfbeta",linear.predictions = FALSE, ggtheme = theme_bw())
+ggcoxdiagnostics(fits,type = "dfbeta",linear.predictions = FALSE, ggtheme = theme_bw())
+ggcoxdiagnostics(fitg,type = "dfbeta",linear.predictions = FALSE, ggtheme = theme_bw())
+ggcoxdiagnostics(fiti,type = "dfbeta",linear.predictions = FALSE, ggtheme = theme_bw())
+ggcoxdiagnostics(fitu,type = "dfbeta",linear.predictions = FALSE, ggtheme = theme_bw())
+ggcoxdiagnostics(fita,type = "dfbeta",linear.predictions = FALSE, ggtheme = theme_bw())
+ggcoxdiagnostics(fitm,type = "dfbeta",linear.predictions = FALSE, ggtheme = theme_bw())
+ggcoxdiagnostics(fitl,type = "dfbeta",linear.predictions = FALSE, ggtheme = theme_bw())
+ggcoxdiagnostics(fitw,type = "dfbeta",linear.predictions = FALSE, ggtheme = theme_bw())
+ggcoxdiagnostics(fitd ,type = "dfbeta",linear.predictions = FALSE, ggtheme = theme_bw())
+ggcoxdiagnostics(fitf ,type = "dfbeta",linear.predictions = FALSE, ggtheme = theme_bw())
+ggcoxdiagnostics(fitb ,type = "dfbeta",linear.predictions = FALSE, ggtheme = theme_bw())
+ggcoxdiagnostics(fitrall ,type = "dfbeta",linear.predictions = FALSE, ggtheme = theme_bw())
+```
+
+```{r}
+ggcoxdiagnostics(fit,type = "deviance",linear.predictions = FALSE, ggtheme = theme_bw())
+ggcoxdiagnostics(fits,type = "deviance",linear.predictions = FALSE, ggtheme = theme_bw())    
+ggcoxdiagnostics(fitg,type = "deviance",linear.predictions = FALSE, ggtheme = theme_bw())    
+ggcoxdiagnostics(fiti,type = "deviance",linear.predictions = FALSE, ggtheme = theme_bw())    
+ggcoxdiagnostics(fitu,type = "deviance",linear.predictions = FALSE, ggtheme = theme_bw())    
+ggcoxdiagnostics(fita,type = "deviance",linear.predictions = FALSE, ggtheme = theme_bw())    
+ggcoxdiagnostics(fitm,type = "deviance",linear.predictions = FALSE, ggtheme = theme_bw())    
+ggcoxdiagnostics(fitl ,type = "deviance",linear.predictions = FALSE, ggtheme = theme_bw())    
+ggcoxdiagnostics(fitw ,type = "deviance",linear.predictions = FALSE, ggtheme = theme_bw())    
+ggcoxdiagnostics(fitd ,type = "deviance",linear.predictions = FALSE, ggtheme = theme_bw())    
+ggcoxdiagnostics(fitf ,type = "deviance",linear.predictions = FALSE, ggtheme = theme_bw())    
+ggcoxdiagnostics(fitb,type = "deviance",linear.predictions = FALSE, ggtheme = theme_bw())    
+ggcoxdiagnostics(fitrall,type="deviance",linear.predictions = FALSE, ggtheme = theme_bw())
+
+```
+
+```{r}
+ggcoxdiagnostics(fit,type = "schoenfeld", title= "diagnostic plot")
+ggcoxdiagnostics(fits,type ="schoenfeld", title= "diagnostic plot")
+ggcoxdiagnostics(fitg,type ="schoenfeld", title= "diagnostic plot")
+ggcoxdiagnostics(fiti,type ="schoenfeld", title= "diagnostic plot")
+ggcoxdiagnostics(fitu,type ="schoenfeld", title= "diagnostic plot")
+ggcoxdiagnostics(fita,type ="schoenfeld", title= "diagnostic plot")
+ggcoxdiagnostics(fitm,type ="schoenfeld", title= "diagnostic plot")
+ggcoxdiagnostics(fitl ,type= "schoenfeld", title= "diagnostic plot")
+ggcoxdiagnostics(fitw ,type ="schoenfeld", title= "diagnostic plot")
+ggcoxdiagnostics(fitd ,type ="schoenfeld", title= "diagnostic plot")
+ggcoxdiagnostics(fitf ,type ="schoenfeld", title= "diagnostic plot")
+ggcoxdiagnostics(fitb,type ="schoenfeld", title= "diagnostic plot")
+ggcoxdiagnostics(fitrall,type="schoenfeld", title= "diagnostic plot")
+```
+
+ #Computing the log rank test (difference between two or more survival curves using the G-rho family of tests)
+ use rho 1 to get the Gehan-Wilcoxon test (weights the survivorship by the number
+surviving which focuses the statistic on early survivorship)
+
+```{r}
+KMrSdr <- survdiff(Surv(time,status)~site,data=DataallD, rho=1)
+#8e-06
+KMgSdr <- survdiff(Surv(time,status)~genotype,data=DataallD, rho=1)
+#0.1
+KMiSd <- survdiff(Surv(time,status)~site + genotype,data=DataallD, rho=1)
+#1e-07
+
+```
+
+
+
+```{r}
+ layout(matrix(1:4, ncol = 2))
+
+pdf(file = "C:/Github/Orbicella_FL/Graphs/KM_geno.pdf",   # The directory you want to save the file in
+    width = 4, # The width of the plot in inches
+    height = 4) # The height of the plot in inches
+
+ gA <- subset(msdor,genotype == "A")
+ plot(survfit(Surv(time, status) ~ genotype, data = gA),
+ main = "Genotype A", lty = c(2, 1),
+ ylab = "Probability", xlab = "Survival Time in Days")#,
+ 
+
+ gB <- subset(msdor,genotype == "B")
+plot(survfit(Surv(time, status) ~ genotype, data = gB),
+ main = "Genotype B", lty = c(2, 1),
+ ylab = "Probability", xlab = "Survival Time in Days")#,
+
+gC <- subset(msdor,genotype == "C")
+ plot(survfit(Surv(time, status) ~ genotype, data = gC),
+ main = "Genotype C", lty = c(2, 1),
+ ylab = "Probability", xlab = "Survival Time in Days")#,
+
+ gD <- subset(msdor,genotype == "D")
+ plot(survfit(Surv(time, status) ~ genotype, data = gD),
+ main = "Genotype D", lty = c(2, 1),
+ ylab = "Probability", xlab = "Survival Time in Days")#,
+
+
+dev.off()
+
+
+layout(matrix(1:4, ncol = 2))
+
+pdf(file = "C:/Github/Orbicella_FL/Graphs/KM_site.pdf",   # The directory you want to save the file in
+    width = 4, # The width of the plot in inches
+    height = 4) # The height of the plot in inches
+ 
+ RC <- subset(msdor,site == "Cary")
+ plot(survfit(Surv(time, status) ~ site, data = RC),
+ main = "Cary", lty = c(2, 1),
+ ylab = "Probability", xlab = "Survival Time in Days")
+ 
+ RO <- subset(msdor,site == "Conch")
+ plot(survfit(Surv(time, status) ~ site, data = RO),
+ main = "Conch", lty = c(2, 1),
+ ylab = "Probability", xlab = "Survival Time in Days")
+ 
+ RL<- subset(msdor,site == "Looe")
+ plot(survfit(Surv(time, status) ~ site, data = RL),
+ main = "Looe", lty = c(2, 1),
+ ylab = "Probability", xlab = "Survival Time in Days")
+
+ RT <- subset(msdor,site == "Tennessee")
+ plot(survfit(Surv(time, status) ~ site, data = RT),
+ main = "Tennessee", lty = c(2, 1),
+ ylab = "Probability", xlab = "Survival Time in Days")
+ 
+dev.off()
+```
+
+```{r}
+covariates <- c("unhealthy", "algae", "mortality",  "tissuehealth", "white", "disease", "bites", "boring")
+univ_formulas <- sapply(covariates,
+                        function(x) as.formula(paste('Surv(time1,time2, status)~', x)))
+                        
+univ_models <- lapply( univ_formulas, function(x){coxph(x, data = msdo)})
+# Extract data 
+univ_results <- lapply(univ_models,
+                       function(x){ 
+                          x <- summary(x)
+                          p.value<-signif(x$wald["pvalue"], digits=2)
+                          wald.test<-signif(x$wald["test"], digits=2)
+                          beta<-signif(x$coef[1], digits=2);#coeficient beta
+                          HR <-signif(x$coef[2], digits=2);#exp(beta)
+                          HR.confint.lower <- signif(x$conf.int[,"lower .95"], 2)
+                          HR.confint.upper <- signif(x$conf.int[,"upper .95"],2)
+                          HR <- paste0(HR, " (", 
+                                       HR.confint.lower, "-", HR.confint.upper, ")")
+                          res<-c(beta, HR, wald.test, p.value)
+                          names(res)<-c("beta", "HR (95% CI for HR)", "wald.test", 
+                                        "p.value")
+                          return(res)
+                          #return(exp(cbind(coef(x),confint(x))))
+                         })
+res <- t(as.data.frame(univ_results, check.names = FALSE))
+as.data.frame(res)
+# NA
+
+```
+
+
+Baseline hazard function is not estimated by the Cox   model, but it is possible to get an estimate by        applying the survfit on the Cox proportional hazards   object
+  #
+```{r}
+fits
+
+levels(DF$site)
+coxr1 <- survfit(fits,newdata=list(site=factor("Cary")))
+coxr2 <- survfit(fits,newdata=list(site=factor("Conch")))
+coxr3 <- survfit(fits,newdata=list(site=factor("Looe")))
+coxr4 <- survfit(fits,newdata=list(site=factor("Tennessee")))
+
+survplotframeRS$cox<-"No"
+
+survplotframeRS<-rbind(survplotframeRS,data.frame(time=coxr1$time,surv=coxr1$surv,upper=coxr1$upper,lower=coxr1$upper,reef="Cary",censor=0,cox="Yes"))
+
+survplotframeRS<-rbind(survplotframeRS,data.frame(time=coxr2$time,surv=coxr2$surv,upper=coxr2$upper,lower=coxr2$upper,reef="Conch",censor=0,cox="Yes"))
+
+survplotframeRS<-rbind(survplotframeRS,data.frame(time=coxr3$time,surv=coxr3$surv,upper=coxr3$upper,lower=coxr3$upper,reef="Looe",censor=0,cox="Yes"))
+
+survplotframeRS<-rbind(survplotframeRS,data.frame(time=coxr4$time,surv=coxr4$surv,upper=coxr4$upper,lower=coxr4$upper,reef="Tennessee",censor=0,cox="Yes"))
+
+survplotreefcox<-ggplot(survplotframeRS,aes(x=time,y=surv,color=reef, linetype=cox))
+
+site<-survplotreefcox+geom_step()+geom_point(data=survplotframeRS[survplotframeRS$censor>0,],shape=3,size=4)+
+  ylab("Survival")+
+  xlab("Time (days)")+
+  scale_x_continuous(limit=c(0,max(survplotframeRS$time)))
+
+site
+ggpubr::ggexport(site, filename = "KM_cox_sites.pdf")
+
+
+```
+
+```{r}
+#fitsr<-coxph(Surv(time, status) ~ site, data = msdor)
+
+#coxr1 <- survfit(fitsr,newdata=list(site=factor("Cary")))
+#coxr2 <- survfit(fitsr,newdata=list(site=factor("Conch")))
+#coxr3 <- survfit(fitsr,newdata=list(site=factor("Looe")))
+#coxr4 <- survfit(fitsr,newdata=list(site=factor("Tennessee")))
+#
+#survplotframeRS2$cox<-"No"
+#
+#survplotframeRS2<-rbind(survplotframeRS2,data.frame(time=coxr1$time,surv=coxr1$surv,upper=coxr1$upper,lower=coxr1$upp#er,reef="Cary",censor=0,cox="Yes"))
+#
+#survplotframeRS2<-rbind(survplotframeRS2,data.frame(time=coxr2$time,surv=coxr2$surv,upper=coxr2$upper,lower=coxr2$upp#er,reef="Conch",censor=0,cox="Yes"))
+#
+#survplotframeRS2<-rbind(survplotframeRS2,data.frame(time=coxr3$time,surv=coxr3$surv,upper=coxr3$upper,lower=coxr3$upp#er,reef="Looe",censor=0,cox="Yes"))
+#
+#survplotframeRS2<-rbind(survplotframeRS2,data.frame(time=coxr4$time,surv=coxr4$surv,upper=coxr4$upper,lower=coxr4$upp#er,reef="Tennessee",censor=0,cox="Yes"))
+#
+#survplotreefcox<-ggplot(survplotframeRS2,aes(x=time,y=surv,color=reef, linetype=cox))
+#
+#survplotreefcox+geom_step()+geom_point(data=survplotframeRS2[survplotframeRS2$censor>0,],shape=3,size=4)+
+#  ylab("Survival")+
+#  xlab("Time (days)")+
+#  scale_x_continuous(limit=c(0,max(survplotframeRS2$time)))
+#
+
+```
+
+
+```{r}
+fitg
+AIC(fits,fitg)
+#fits is better model 218.7196
+levels(msdo$genotype)
+
+coxg1 <- survfit(fitg,newdata=list(genotype=factor("A")))
+coxg2 <- survfit(fitg,newdata=list(genotype=factor("B")))
+coxg3 <- survfit(fitg,newdata=list(genotype=factor("C")))
+coxg4 <- survfit(fitg,newdata=list(genotype=factor("D")))
+
+survplotframeGS$cox<-"No"
+
+survplotframeGS<-rbind(survplotframeGS,data.frame(time=coxg1$time,surv=coxg1$surv,upper=coxg1$upper,lower=coxg1$upper,genotype="A",censor=0,cox="Yes"))
+
+survplotframeGS<-rbind(survplotframeGS,data.frame(time=coxg2$time,surv=coxg2$surv,upper=coxg2$upper,lower=coxg2$upper,genotype="B",censor=0,cox="Yes"))
+
+survplotframeGS<-rbind(survplotframeGS,data.frame(time=coxg3$time,surv=coxg3$surv,upper=coxg3$upper,lower=coxg3$upper,genotype="C",censor=0,cox="Yes"))
+
+survplotframeGS<-rbind(survplotframeGS,data.frame(time=coxg4$time,surv=coxg4$surv,upper=coxg4$upper,lower=coxg4$upper,genotype="D",censor=0,cox="Yes"))
+
+survplotgenocox<-ggplot(survplotframeGS,aes(x=time,y=surv,color=genotype, linetype=cox))
+
+genotype<-survplotgenocox+geom_step()+geom_point(data=survplotframeGS[survplotframeGS$censor>0,],shape=3,size=4)+
+  ylab("Survival")+
+  xlab("Time (days)")+
+  scale_x_continuous(limit=c(0,max(survplotframeGS$time)))
+
+genotype
+
+ggpubr::ggexport(genotype, filename = "KM_cox_genotype.pdf")
+
+```
+
+```{r}
+#
+#fitgr<-coxph(Surv(time, status) ~ genotype, data = msdor)
+AIC(fitgr, fitsr)
+#fitsr is better model 156.849
+#coxg1 <- survfit(fitgr,newdata=list(genotype=factor("A")))
+#coxg2 <- survfit(fitgr,newdata=list(genotype=factor("B")))
+#coxg3 <- survfit(fitgr,newdata=list(genotype=factor("C")))
+#coxg4 <- survfit(fitgr,newdata=list(genotype=factor("D")))
+#
+#survplotframeGS2$cox<-"No"
+#
+#
+#survplotframeGS2<-rbind(survplotframeGS2,data.frame(time=coxg1$time,surv=coxg1$surv,upper=coxg1$upper,lower=coxg1$upp#er,genotype="A",censor=0,cox="Yes"))
+#
+#survplotframeGS2<-rbind(survplotframeGS2,data.frame(time=coxg2$time,surv=coxg2$surv,upper=coxg2$upper,lower=coxg2$upp#er,genotype="B",censor=0,cox="Yes"))
+#
+#survplotframeGS2<-rbind(survplotframeGS2,data.frame(time=coxg3$time,surv=coxg3$surv,upper=coxg3$upper,lower=coxg3$upp#er,genotype="C",censor=0,cox="Yes"))
+#
+#survplotframeGS2<-rbind(survplotframeGS2,data.frame(time=coxg4$time,surv=coxg4$surv,upper=coxg4$upper,lower=coxg4$upp#er,genotype="D",censor=0,cox="Yes"))
+#
+#survplotgenocox<-ggplot(survplotframeGS2,aes(x=time,y=surv,color=genotype, linetype=cox))
+#
+#survplotgenocox+geom_step()+geom_point(data=survplotframeGS2[survplotframeGS2$censor>0,],shape=3,size=4)+
+#  ylab("Survival")+
+#  xlab("Time (days)")+
+#  scale_x_continuous(limit=c(0,max(survplotframeGS2$time)))
+#
+```
+
+```{r}
+
+fitcati<-coxph(formula = Surv(time1, time2, status) ~ cat, data = msdo)
+#Likelihood ratio test=48.74  on 15 df, p=1.93e-05
+#n= 272, number of events= 34 
+levels(msdo$cat)
+
+coxic1 <- survfit(fitcati,newdata=list(cat=factor("Cary A")))
+coxic2 <- survfit(fitcati,newdata=list(cat=factor("Cary B")))
+coxic3 <- survfit(fitcati,newdata=list(cat=factor("Cary C")))
+coxic4 <- survfit(fitcati,newdata=list(cat=factor("Cary D")))
+coxi01 <- survfit(fitcati,newdata=list(cat=factor("Conch A")))
+coxi02 <- survfit(fitcati,newdata=list(cat=factor("Conch B")))
+coxi03 <- survfit(fitcati,newdata=list(cat=factor("Conch C")))
+coxi04 <- survfit(fitcati,newdata=list(cat=factor("Conch D")))
+coxil1 <- survfit(fitcati,newdata=list(cat=factor("Looe A")))
+coxil2 <- survfit(fitcati,newdata=list(cat=factor("Looe B")))
+coxil3 <- survfit(fitcati,newdata=list(cat=factor("Looe C")))
+coxil4 <- survfit(fitcati,newdata=list(cat=factor("Looe D")))
+coxit1 <- survfit(fitcati,newdata=list(cat=factor("Tennessee A")))
+coxit2 <- survfit(fitcati,newdata=list(cat=factor("Tennessee B")))
+coxit3 <- survfit(fitcati,newdata=list(cat=factor("Tennessee C")))
+coxit4 <- survfit(fitcati,newdata=list(cat=factor("Tennessee D")))
+
+survplotframeKMiSb$cox<-"No"
+
+survplotframeKMiSb<-rbind(survplotframeKMiSb,data.frame(time=coxic1$time,surv=coxic1$surv,upper=coxic1$upper,lower=coxic1$upper,ID="Cary_A",censor=0,cox="Yes"))
+
+survplotframeKMiSb<-rbind(survplotframeKMiSb,data.frame(time=coxic2$time,surv=coxic2$surv,upper=coxic2$upper,lower=coxic2$upper,ID="Cary_B",censor=0,cox="Yes"))
+
+survplotframeKMiSb<-rbind(survplotframeKMiSb,data.frame(time=coxic3$time,surv=coxic3$surv,upper=coxic3$upper,lower=coxic3$upper,ID="Cary_C",censor=0,cox="Yes"))
+
+survplotframeKMiSb<-rbind(survplotframeKMiSb,data.frame(time=coxic4$time,surv=coxic4$surv,upper=coxic4$upper,lower=coxic4$upper,ID="Cary_D",censor=0,cox="Yes"))
+
+survplotframeKMiSb<-rbind(survplotframeKMiSb,data.frame(time=coxi01$time,surv=coxi01$surv,upper=coxi01$upper,lower=coxi01$upper,ID="Conch_A",censor=0,cox="Yes"))
+
+survplotframeKMiSb<-rbind(survplotframeKMiSb,data.frame(time=coxi02$time,surv=coxi02$surv,upper=coxi02$upper,lower=coxi02$upper,ID="Conch_B",censor=0,cox="Yes"))
+
+survplotframeKMiSb<-rbind(survplotframeKMiSb,data.frame(time=coxg3$time,surv=coxg3$surv,upper=coxg3$upper,lower=coxg3$upper,ID="Conch_C",censor=0,cox="Yes"))
+
+survplotframeKMiSb<-rbind(survplotframeKMiSb,data.frame(time=coxi04$time,surv=coxi04$surv,upper=coxi04$upper,lower=coxi04$upper,ID="Conch_D",censor=0,cox="Yes"))
+
+survplotframeKMiSb<-rbind(survplotframeKMiSb,data.frame(time=coxil1$time,surv=coxil1$surv,upper=coxil1$upper,lower=coxil1$upper,ID="Looe_A",censor=0,cox="Yes"))
+
+survplotframeKMiSb<-rbind(survplotframeKMiSb,data.frame(time=coxil2$time,surv=coxil2$surv,upper=coxil2$upper,lower=coxil2$upper,ID="Looe_B",censor=0,cox="Yes"))
+
+survplotframeKMiSb<-rbind(survplotframeKMiSb,data.frame(time=coxil3$time,surv=coxil3$surv,upper=coxil3$upper,lower=coxil3$upper,ID="Looe_C",censor=0,cox="Yes"))
+
+survplotframeKMiSb<-rbind(survplotframeKMiSb,data.frame(time=coxil4$time,surv=coxil4$surv,upper=coxil4$upper,lower=coxil4$upper,ID="Looe_D",censor=0,cox="Yes"))
+
+survplotframeKMiSb<-rbind(survplotframeKMiSb,data.frame(time=coxit1$time,surv=coxit1$surv,upper=coxit1$upper,lower=coxit1$upper,ID="Tennessee_A",censor=0,cox="Yes"))
+
+survplotframeKMiSb<-rbind(survplotframeKMiSb,data.frame(time=coxit2$time,surv=coxit2$surv,upper=coxit2$upper,lower=coxit2$upper,ID="Tennessee_B",censor=0,cox="Yes"))
+
+survplotframeKMiSb<-rbind(survplotframeKMiSb,data.frame(time=coxit3$time,surv=coxit3$surv,upper=coxit3$upper,lower=coxit3$upper,ID="Tennessee_C",censor=0,cox="Yes"))
+
+survplotframeKMiSb<-rbind(survplotframeKMiSb,data.frame(time=coxit4$time,surv=coxit4$surv,upper=coxit4$upper,lower=coxit4$upper,ID="Tennessee_D",censor=0,cox="Yes"))
+
+survplotintcox<-ggplot(survplotframeKMiSb,aes(x=time,y=surv,color=ID, linetype=cox))
+
+survplotintcox+geom_step()+geom_point(data=survplotframeKMiSb[survplotframeKMiSb$censor>0,],shape=3,size=4)+
+  ylab("Survival")+
+  xlab("Time (days)")+
+  scale_x_continuous(limit=c(0,max(survplotframeKMiSb$time)))
+```
+
+
+```{r}
+#
+#fitcatir<-coxph(formula = Surv(time, status) ~ cat, data = msdor)
+##Likelihood ratio test=34  on 15 df, p=0.003401
+##n= 64, number of events= 25 
+#
+#levels(msdo$cat)
+#
+#coxic1 <- survfit(fitcatir,newdata=list(cat=factor("Cary A")))
+#coxic2 <- survfit(fitcatir,newdata=list(cat=factor("Cary B")))
+#coxic3 <- survfit(fitcatir,newdata=list(cat=factor("Cary C")))
+#coxic4 <- survfit(fitcatir,newdata=list(cat=factor("Cary D")))
+#coxi01 <- survfit(fitcatir,newdata=list(cat=factor("Conch A")))
+#coxi02 <- survfit(fitcatir,newdata=list(cat=factor("Conch B")))
+#coxi03 <- survfit(fitcatir,newdata=list(cat=factor("Conch C")))
+#coxi04 <- survfit(fitcatir,newdata=list(cat=factor("Conch D")))
+#coxil1 <- survfit(fitcatir,newdata=list(cat=factor("Looe A")))
+#coxil2 <- survfit(fitcatir,newdata=list(cat=factor("Looe B")))
+#coxil3 <- survfit(fitcatir,newdata=list(cat=factor("Looe C")))
+#coxil4 <- survfit(fitcatir,newdata=list(cat=factor("Looe D")))
+#coxit1 <- survfit(fitcatir,newdata=list(cat=factor("Tennessee A")))
+#coxit2 <- survfit(fitcatir,newdata=list(cat=factor("Tennessee B")))
+#coxit3 <- survfit(fitcatir,newdata=list(cat=factor("Tennessee C")))
+#coxit4 <- survfit(fitcatir,newdata=list(cat=factor("Tennessee D")))
+#
+#survplotframeKMiS2$cox<-"No"
+#
+#survplotframeKMiS2<-rbind(survplotframeKMiS2,data.frame(time=coxic1$time,surv=coxic1$surv,upper=coxic1$upper,lower=co#xic1$upper,ID="Cary_A",censor=0,cox="Yes"))
+#
+#survplotframeKMiS2<-rbind(survplotframeKMiS2,data.frame(time=coxic2$time,surv=coxic2$surv,upper=coxic2$upper,lower=co#xic2$upper,ID="Cary_B",censor=0,cox="Yes"))
+#
+#survplotframeKMiS2<-rbind(survplotframeKMiS2,data.frame(time=coxic3$time,surv=coxic3$surv,upper=coxic3$upper,lower=co#xic3$upper,ID="Cary_C",censor=0,cox="Yes"))
+#
+#survplotframeKMiS2<-rbind(survplotframeKMiS2,data.frame(time=coxic4$time,surv=coxic4$surv,upper=coxic4$upper,lower=co#xic4$upper,ID="Cary_D",censor=0,cox="Yes"))
+#
+#survplotframeKMiS2<-rbind(survplotframeKMiS2,data.frame(time=coxi01$time,surv=coxi01$surv,upper=coxi01$upper,lower=co#xi01$upper,ID="Conch_A",censor=0,cox="Yes"))
+#
+#survplotframeKMiS2<-rbind(survplotframeKMiS2,data.frame(time=coxi02$time,surv=coxi02$surv,upper=coxi02$upper,lower=co#xi02$upper,ID="Conch_B",censor=0,cox="Yes"))
+#
+#survplotframeKMiS2<-rbind(survplotframeKMiS2,data.frame(time=coxg3$time,surv=coxg3$surv,upper=coxg3$upper,lower=coxg3#$upper,ID="Conch_C",censor=0,cox="Yes"))
+#
+#survplotframeKMiS2<-rbind(survplotframeKMiS2,data.frame(time=coxi04$time,surv=coxi04$surv,upper=coxi04$upper,lower=co#xi04$upper,ID="Conch_D",censor=0,cox="Yes"))
+#
+#survplotframeKMiS2<-rbind(survplotframeKMiS2,data.frame(time=coxil1$time,surv=coxil1$surv,upper=coxil1$upper,lower=co#xil1$upper,ID="Looe_A",censor=0,cox="Yes"))
+#
+#survplotframeKMiS2<-rbind(survplotframeKMiS2,data.frame(time=coxil2$time,surv=coxil2$surv,upper=coxil2$upper,lower=co#xil2$upper,ID="Looe_B",censor=0,cox="Yes"))
+#
+#survplotframeKMiS2<-rbind(survplotframeKMiS2,data.frame(time=coxil3$time,surv=coxil3$surv,upper=coxil3$upper,lower=co#xil3$upper,ID="Looe_C",censor=0,cox="Yes"))
+#
+#survplotframeKMiS2<-rbind(survplotframeKMiS2,data.frame(time=coxil4$time,surv=coxil4$surv,upper=coxil4$upper,lower=co#xil4$upper,ID="Looe_D",censor=0,cox="Yes"))
+#
+#survplotframeKMiS2<-rbind(survplotframeKMiS2,data.frame(time=coxit1$time,surv=coxit1$surv,upper=coxit1$upper,lower=co#xit1$upper,ID="Tennessee_A",censor=0,cox="Yes"))
+#
+#survplotframeKMiS2<-rbind(survplotframeKMiS2,data.frame(time=coxit2$time,surv=coxit2$surv,upper=coxit2$upper,lower=co#xit2$upper,ID="Tennessee_B",censor=0,cox="Yes"))
+#
+#survplotframeKMiS2<-rbind(survplotframeKMiS2,data.frame(time=coxit3$time,surv=coxit3$surv,upper=coxit3$upper,lower=co#xit3$upper,ID="Tennessee_C",censor=0,cox="Yes"))
+#
+#survplotframeKMiS2<-rbind(survplotframeKMiS2,data.frame(time=coxit4$time,surv=coxit4$surv,upper=coxit4$upper,lower=co#xit4$upper,ID="Tennessee_D",censor=0,cox="Yes"))
+#
+#survplotintcox<-ggplot(survplotframeKMiS2,aes(x=time,y=surv,color=ID, linetype=cox))
+#
+#survplotintcox+geom_step()+geom_point(data=survplotframeKMiS2[survplotframeKMiS2$censor>0,],shape=3,size=4)+
+#  ylab("Survival")+
+#  xlab("Time (days)")+
+#  scale_x_continuous(limit=c(0,max(survplotframeKMiS2$time)))
+```
+  cox proportional hazard regression as a mixed model approach for    accounting for observational heterogeneity using:
+  
+  frailty as a function to wrap around the grouping variable
+  
+  Usually cluster is favored which is an approach that uses
+  GEE fitting to accomodate the correlation
+  
+```{r}
+
+ 
+# cluster
+reefcoxc<- coxph(Surv(time1, time2,status)~site+cluster(genotype),data=msdo)
+genocoxc<- coxph(Surv(time1, time2,status)~genotype+cluster(site),data=msdo)
+# frailty
+reefcoxf<- coxph(Surv(time,status)~site+frailty(genotype),data=msdor)
+genocoxf<- coxph(Surv(time,status)~genotype+frailty(site),data=msdor)
+
+
+
+summary(reefcoxc)
+summary(reefcoxf)
+summary(genocoxc) #wow... BIG numbers
+summary(genocoxf)
+# find best MODEL
+AIC(fitg,fit)
+AIC(reefcoxc,genocoxc,fitin)
+AIC(reefcoxf,genocoxf,fitcatir)
+#The model with the lowest AIC offers the best fit
+reefcoxc# 218.7196
+reefcoxf# 156.8493
+# CLUSTER MODELS ARE THE BEST model fit
+fits
+fitsr
+reefcoxc
+reefcoxf
+# the four best models Site. and for interactive site with Clustered genotype
+```
+
+  Assessing the assumption of proportional hazards
+  The proportional hazards assumption means that we are assuming that the explanatory variable only changes the chance of failure - not the timing of periods of high hazard. The explanatory variable acts directly on the baseline hazard function and not on the failure time, and remains constant over time
+  
+```{r}
+###################################################
+###Assessing the assumption of proportional hazards
+###If the proportional hazards assumption is met, the function should show parallel lines NOT crossing
+###Another graphical methods for checking proportional hazards is to plot log(-log(S(t))) vs. t or log(t) and look for parallelism
+###################################################
+
+
+## reef
+
+KMr 
+KMrr
+
+survplotframeKMrS<- data.frame(time=KMr$time,surv=KMr$surv,
+reef=factor(rep(c("Cary","Conch","Looe","Tennessee"),KMr$strata)),censor=KMr$n.censor)
+
+survplotKMiS2 <- ggplot(survplotframeKMrS,aes(x=time,y=log(-log(surv)),color=reef))+labs(x="Time (days)",y="log(-log(S(t)))")
+
+survplotKMiS2+geom_step()+scale_x_continuous(
+limit=c(0,max(survplotframeKMrS$time)))
+
+
+survplotframeKMrSb<- data.frame(time=KMrr$time,surv=KMrr$surv,
+reef=factor(rep(c("Cary","Conch","Looe","Tennessee"),KMrr$strata)),censor=KMrr$n.censor)
+
+survplotKMiSb <- ggplot(survplotframeKMrSb,aes(x=time,y=log(-log(surv)),color=reef))+labs(x="Time (days)",y="log(-log(S(t)))")
+
+survplotKMiSb+geom_step()+scale_x_continuous(
+limit=c(0,max(survplotframeKMrSb$time)))
+
+### for genotype
+KM2 
+KM2r
+
+survplotframeKMg<- data.frame(time=KM2$time,surv=KM2$surv,
+genotype=factor(rep(c("A","B","C","D"),KM2$strata)),censor=KM2$n.censor)
+survplotKMg <- ggplot(survplotframeKMg,aes(x=time,y=log(-log(surv)),color=genotype))+labs(x="Time (days)",y="log(-log(S(t)))")
+survplotKMg+geom_step()+scale_x_continuous(
+limit=c(0,max(survplotframeKMg$time)))
+
+survplotframeKMg<- data.frame(time=KM2r$time,surv=KM2r$surv,
+genotype=factor(rep(c("A","B","C","D"),KM2r$strata)),censor=KM2r$n.censor)
+survplotKMg <- ggplot(survplotframeKMg,aes(x=time,y=log(-log(surv)),color=genotype))+labs(x="Time (days)",y="log(-log(S(t)))")
+survplotKMg+geom_step()+scale_x_continuous(
+limit=c(0,max(survplotframeKMg$time)))
+
+## Interactive trying
+KMb 
+KMbr
+
+
+KMb
+survplotframeKMi<- data.frame(time=KMb$time,surv=KMb$surv,
+ID=factor(rep(c("Cary_A","Cary_B", "Cary_C","Cary_D","Conch_A", "Conch_B", "Conch_C", "Conch_D","Looe_A", "Looe_B", "Looe_C","Looe_D", "Tennessee_A", "Tennessee_B", "Tennessee_C","Tennessee_D"),KMb$strata)),censor=KMb$n.censor)
+survplotKMi <- ggplot(survplotframeKMi,aes(x=time,y=log(-log(surv)),color=ID))+labs(x="Time (days)",y="log(-log(S(t)))")
+survplotKMi+geom_step()+scale_x_continuous(
+limit=c(0,max(survplotframeKMi$time)))
+
+survplotframeKMi<- data.frame(time=KMbr$time,surv=KMbr$surv,
+ID=factor(rep(c("Cary_A","Cary_B", "Cary_C","Cary_D","Conch_A", "Conch_B", "Conch_C", "Conch_D","Looe_A", "Looe_B", "Looe_C","Looe_D", "Tennessee_A", "Tennessee_B", "Tennessee_C","Tennessee_D"),KMbr$strata)),censor=KMbr$n.censor)
+survplotKMi <- ggplot(survplotframeKMi,aes(x=time,y=log(-log(surv)),color=ID))+labs(x="Time (days)",y="log(-log(S(t)))")
+survplotKMi+geom_step()+scale_x_continuous(
+limit=c(0,max(survplotframeKMi$time)))
+
+# Assumption of Proportional hazards is MET (from graphical log(-log(S(t))) vs. t or log(t) and look for parallelism & Schoenfeld residual )
+
+KMc 
+KMcr
+```
+
+  Schoenfeld residual 
+  construct residuals from a survival analysis that can be used for both graphical and analytical analyses
+  cox.zph generates a test of this. The null hypothesis is that the residuals do not vary with time
+
+```{r}
+zphs <- cox.zph(fits)
+#zphsr <- cox.zph(fitsr)
+zphcs <- cox.zph(reefcoxc)
+zphg <- cox.zph(fitg)
+#zphgr<- cox.zph(fitgr)
+#zphcsr <- cox.zph(reefcoxf) does not work in the cox.zph function- no fragilty
+
+zphs 
+#zphsr
+zphcs
+zphg
+#zphgr
+#
+#From the output above, the test is not statistically significant for each of the covariates, and the global test is also not statistically significant. Therefore, we can assume the proportional hazards.
+
+###  residuals DO not change in time= highh p-value indicating these models meet the null hypothesis ie residuals do not change over time
+###  They meet the proportional hazards assumption
+
+ggcoxzph(zphs)
+#ggcoxzph(zphsr)
+ggcoxzph(zphcs)
+ggcoxzph(zphg)
+#ggcoxzph(zphgr)
+##In the figure above, the solid line is a smoothing spline fit to the plot, with the dashed lines representing a +/- 2-standard-error band around the fit.
+##
+###The assumption of proportional hazards appears to be supported for the covariate
+layout(matrix(1:3))
+#plot(zphr, var = "reef") # same as zphrb just diff #time adjustment- go with binhealth zphrb
+#plot(zphg, var = "genotype") # same for geno
+#plot(zphi, var = "ID")# same for Interactive
+plot(zphs, var = "site")
+#plot(zphsr, var = "site")
+plot(zphcs, var = "site")
+layout(matrix(1:2))
+plot(zphg, var = "genotype")
+#plot(zphgr, var = "genotype")
+
+```
+
+  Parametric survival models
+  For instance, parametric survival models are essential for extrapolating survival outcomes beyond the available follow-up data.
+  There are four basic distributions:extreme, gaussian, logistic and t.
+  
+these models have specific forms for the hazard function implied and the fitting, done with the function survreg
+will model linear effect of the variable on a particular parameter in the model.
+In the case of the Weibull distribution, this is the log of the scale parameter, λ, which generally indicates
+the effect on the time to failure. 
+Parametric survival models are an alternative of Cox regression mode
+Biological phenomena like lengths of latent periods of infectious diseases and distribution of mineral resources in the Earth's crust have skewed distributions and are often closely fit the log‐normal distribution
+
+```{r}
+lognbr2c<- survreg(Surv(time,status)~site,data=DataallD, dist="logistic")
+lognbg2c<- survreg(Surv(time,status)~genotype,data=DataallD, dist="logistic")
+lognbi2c<- survreg(Surv(time,status)~cat,data=DataallD, dist="logistic")
+
+expobrc<- survreg(Surv(time,status)~site,data=DataallD, dist="extreme")
+expobgc<- survreg(Surv(time,status)~genotype,data=DataallD, dist="extreme")
+expobic<- survreg(Surv(time,status)~cat,data=DataallD, dist="extreme")
+
+
+tdisbrc<- survreg(Surv(time,status)~site,data=DataallD, dist="t")
+tdisbgc<- survreg(Surv(time,status)~genotype,data=DataallD, dist="t")
+tdisbic<- survreg(Surv(time,status)~cat,data=DataallD, dist="t")
+
+
+gausbrc<- survreg(Surv(time,status)~site,data=DataallD, dist="gaussian")
+gausbgc<- survreg(Surv(time,status)~genotype,data=DataallD, dist="gaussian")
+gausbic<- survreg(Surv(time,status)~cat,data=DataallD, dist="gaussian")
+
+weibbrc<- survreg(Surv(time,status)~site,data=DataallD, dist="weibull")
+weibbgc<- survreg(Surv(time,status)~genotype,data=DataallD, dist="weibull")
+weibbic<- survreg(Surv(time,status)~cat,data=DataallD, dist="weibull")
+
+
+AIC(lognbr2c,expobrc,tdisbrc,gausbrc,weibbrc,lognbr2,expobr,tdisbr,gausbr,weibbg)
+summary(gausbrc)    #T- dis
+#p= 6e-09 Chisq
+AIC(lognbg2c,expobgc,tdisbgc,gausbgc,weibbgc,lognbg2,expobg,tdisbg,gausbg,weibbg)
+summary(gausbgc)    #Weibull dis gausbgc
+#p= 0.059 chisqr
+AIC(lognbi2c,expobic,tdisbic,gausbic,weibbic,lognbi2,expobi,tdisbi,gausbi,weibbi)
+summary(expobic)   #extreme dis
+#7e-06 chisqr
+
+#coefficients are positive= increase in the time to failure in
+# also has a fit of a Log(scale) parameter= Positive values of
+#Log(scale) reflect increasing hazard with time, negative #reflect decreasing risk in time.
+#BEST fitting models for Genotype and Reef site
+```
+
+```{r}
+
+gausbrc   
+## check whether the assumed distribution of survival times fits the observed data sufficiently well, we can use the residuals of the model
+
+fitted_values <- gausbrc$linear.predictors
+
+resids <- (log(gausbrc$y[, 1]) - fitted_values) / gausbrc$scale
+resKM <- survfit(Surv(resids, status) ~ site, data = msdor)
+dev.off()
+plot(resKM, mark.time = FALSE, xlab = "AFT Residuals", ylab = "Survival Probability")
+xx <- seq(min(resids), max(resids), length.out = 35)
+yy <- exp(- exp(xx))
+lines(xx, yy, col = "red", lwd = 2)
+legend("bottomleft", c("KM estimate", "95% CI KM estimate", 
+    "Survival function of Extreme Value distribution"), 
+    lty = c(1,2,1), col = c(1,1,2), bty = "n")
+#best fit
+
+pct=1:99/100
+ptimeR <- predict(gausbrc, newdata=data.frame(site=factor(
+c("Cary","Conch","Looe", "Tennessee"))), type='quantile', p=pct)
+
+ptimeR <- data.frame(pish=1:dim(ptimeR)[2],t(ptimeR))
+
+names(ptimeR)<-c("pish","Cary","Conch","Looe", "Tennessee")
+colors2 <-  thematic::okabe_ito(4)
+
+ptimeR <- tidyr::gather(ptimeR,key=site,value=time ,Cary, Conch, Looe, Tennessee)
+ptimeR$years<-ptimeR$time/365
+
+Reefsurv <- ggplot(ptimeR,aes(x=years,y=1-pish/100,color=site))+
+  geom_line(size= , position = "jitter")+
+  scale_color_manual(values = colors2)+
+  labs(color="Reef",y="Fitted Gaussian-distribution (% Survival)", x= "Time (Years)")+
+  ggtitle("A)")
+
+Reefsurv
+
+ggpubr::ggexport(Reefsurv, filename = "Gau_dist_sitesDA.pdf")
+
+################# genotype
+gausbgc
+## check whether the assumed distribution of survival times fits the observed data sufficiently well, we can use the residuals of the model
+fitted_values <- gausbgc$linear.predictors
+
+resids <- (log(gausbgc$y[, 1]) - fitted_values) / gausbgc$scale
+resKM <- survfit(Surv(resids, status) ~ genotype, data = msdor)
+dev.off()
+plot(resKM, mark.time = FALSE, xlab = "AFT Residuals", ylab = "Survival Probability")
+xx <- seq(min(resids), max(resids), length.out = 35)
+yy <- exp(- exp(xx))
+lines(xx, yy, col = "red", lwd = 2)
+legend("bottomleft", c("KM estimate", "95% CI KM estimate", 
+    "Survival function of Extreme Value distribution"), 
+    lty = c(1,2,1), col = c(1,1,2), bty = "n")
+#best fit
+
+ptimeG <- predict(gausbgc, newdata=data.frame(genotype=factor(c("A","B","C","D"))), type='quantile', p=pct)
+
+ptimeG <- data.frame(pish=1:dim(ptimeG)[2],t(ptimeG))
+
+names(ptimeG)<-c("pish","A","B","C","D")
+
+ptimeG <- gather(ptimeG,key=genotype,value=time,A,B,C,D)
+
+ptimeG$years<-ptimeG$time/365
+
+GenoSurvge <- ggplot(ptimeG,aes(x=years,y=1-pish/100,color=genotype))+
+  geom_line(size= 1, position = "jitter")+
+  scale_color_manual(values = colors2)+
+  labs(color="Genotype",y="Fitted Gaussian (% Survival)", x="Time (Years)")+ggtitle("B)")
+
+GenoSurvge
+ggpubr::ggexport(GenoSurvge, filename = "gaus_genoDA.pdf")
+
+
+################# interactive 
+expobic
+## check whether the assumed distribution of survival times fits the observed data sufficiently well, we can use the residuals of the model
+fitted_values <- expobic$linear.predictors
+
+resids <- (log(expobic$y[, 1]) - fitted_values) / expobic$scale
+resKM <- survfit(Surv(resids, status) ~ cat, data = msdor)
+dev.off()
+plot(resKM, mark.time = FALSE, xlab = "AFT Residuals", ylab = "Survival Probability")
+xx <- seq(min(resids), max(resids), length.out = 35)
+yy <- exp(- exp(xx))
+lines(xx, yy, col = "red", lwd = 2)
+legend("bottomleft", c("KM estimate", "95% CI KM estimate", 
+    "Survival function of Extreme Value distribution"), 
+    lty = c(1,2,1), col = c(1,1,2), bty = "n")
+
+
+ptimeI <- predict(expobic, newdata=data.frame(cat=factor(
+c("Cary A","Cary B", "Cary C","Cary D","Conch A", "Conch B", "Conch C", "Conch D","Looe A", "Looe B", "Looe C","Looe D", "Tennessee A", "Tennessee B", "Tennessee C","Tennessee D"))), type='quantile', p=pct)
+
+ptimeI <- data.frame(pish=1:dim(ptimeI)[2],t(ptimeI))
+
+names(ptimeI)<-c("pish","Cary A","Cary B", "Cary C","Cary D","Conch A", "Conch B", "Conch C", "Conch D","Looe A", "Looe B", "Looe C","Looe D", "Tennessee A", "Tennessee B", "Tennessee C","Tennessee D")
+
+ptimeI <- gather(ptimeI,key=ID,value=time ,"Cary A","Cary B", "Cary C","Cary D","Conch A", "Conch B", "Conch C", "Conch D","Looe A", "Looe B", "Looe C","Looe D", "Tennessee A", "Tennessee B", "Tennessee C","Tennessee D")
+
+
+ptimeI$years<-ptimeI$time/365
+
+interSurvge <- ggplot(ptimeI,aes(x=years,y=1-pish/100,color=ID))+
+  geom_line(size= 1, position = "jitter")+
+  labs(color="Genotype",y="Fitted Exponential (% Survival)", x="Time (Years)")+ggtitle("C)")
+  
+  interSurvge
+ggpubr::ggexport(interSurvge, filename = "gaus_interDA.pdf")
+
+
+
+```
+
+
+generate survivor functions from these models using the predict function. {plot a predicted time to survival for each observation}
+generate the survival
+function, we can assign ”quantile” to the type argument and give it a vector for the probabilities.
+
+T-sidtribution (site) and gaussian (genotype) is BEST model for ALL using  DataallD
+
+
+```{r}
+theme_set(theme_classic())
+setwd( "C:/Github/Orbicella_FL/Graphs")
+
+
+fitsr
+fitgr
+reefcoxf
+
+lognbr2
+expobr
+tdisbr
+gausbr
+fitsr
+
+tdisbr
+## check whether the assumed distribution of survival times fits the observed data sufficiently well, we can use the residuals of the model
+
+
+
+fitted_values <- tdisbr$linear.predictors
+
+resids <- (log(tdisbr$y[, 1]) - fitted_values) / tdisbr$scale
+resKM <- survfit(Surv(resids, status) ~ site, data = msdor)
+dev.off()
+plot(resKM, mark.time = FALSE, xlab = "AFT Residuals", ylab = "Survival Probability")
+xx <- seq(min(resids), max(resids), length.out = 35)
+yy <- exp(- exp(xx))
+lines(xx, yy, col = "red", lwd = 2)
+legend("bottomleft", c("KM estimate", "95% CI KM estimate", 
+    "Survival function of Extreme Value distribution"), 
+    lty = c(1,2,1), col = c(1,1,2), bty = "n")
+#best fit
+
+pct=1:99/100
+ptimeR <- predict(tdisbr, newdata=data.frame(site=factor(
+c("Cary","Conch","Looe", "Tennessee"))), type='quantile', p=pct)
+
+ptimeR <- data.frame(pish=1:dim(ptimeR)[2],t(ptimeR))
+
+names(ptimeR)<-c("pish","Cary","Conch","Looe", "Tennessee")
+colors2 <-  thematic::okabe_ito(4)
+
+ptimeR <- tidyr::gather(ptimeR,key=site,value=time ,Cary, Conch, Looe, Tennessee)
+ptimeR$years<-ptimeR$time/365
+
+Reefsurv <- ggplot(ptimeR,aes(x=years,y=1-pish/100,color=site))+
+  geom_line(size= 1.05)+
+  scale_color_manual(values = colors2)+
+  labs(color="Reef",y="Fitted T-distribution (% survival", x= "Time (Years)")+
+  ggtitle("T-distribution Extrapolated Survival ")
+
+Reefsurv
+
+ggpubr::ggexport(Reefsurv, filename = "T_dist_sites.pdf")
+
+
+lognbr2
+## check whether the assumed distribution of survival times fits the observed data sufficiently well, we can use the residuals of the model
+fitted_values <- lognbr2$linear.predictors
+
+resids <- (log(lognbr2$y[, 1]) - fitted_values) / lognbr2$scale
+resKM <- survfit(Surv(resids, status) ~ site, data = msdor)
+dev.off()
+plot(resKM, mark.time = FALSE, xlab = "AFT Residuals", ylab = "Survival Probability")
+xx <- seq(min(resids), max(resids), length.out = 35)
+yy <- exp(- exp(xx))
+lines(xx, yy, col = "red", lwd = 2)
+legend("bottomleft", c("KM estimate", "95% CI KM estimate", 
+    "Survival function of Extreme Value distribution"), 
+    lty = c(1,2,1), col = c(1,1,2), bty = "n")
+
+ptimeR <- predict(lognbr2, newdata=data.frame(site=factor(
+c("Cary","Conch","Looe", "Tennessee"))), type='quantile', p=pct)
+
+ptimeR <- data.frame(pish=1:dim(ptimeR)[2],t(ptimeR))
+
+names(ptimeR)<-c("pish","Cary","Conch","Looe", "Tennessee")
+
+ptimeR <- tidyr::gather(ptimeR,key=site,value=time ,Cary, Conch, Looe, Tennessee)
+ptimeR$years<-ptimeR$time/365
+
+Reefsurvl <- ggplot(ptimeR,aes(x=years,y=1-pish/100,color=site))+
+  geom_line()+
+    scale_color_manual(values = colors2)+
+labs(color="Reef",y="Survival", x= "Time (Years)")+
+  ggtitle("Logistic")
+
+Reefsurvl
+
+ggpubr::ggexport(Reefsurvl, filename = "logistic_sites.pdf")
+
+expobr
+## check whether the assumed distribution of survival times fits the observed data sufficiently well, we can use the residuals of the model
+fitted_values <- expobr$linear.predictors
+
+resids <- (log(expobr$y[, 1]) - fitted_values) / expobr$scale
+resKM <- survfit(Surv(resids, status) ~ site, data = msdor)
+dev.off()
+plot(resKM, mark.time = FALSE, xlab = "AFT Residuals", ylab = "Survival Probability")
+xx <- seq(min(resids), max(resids), length.out = 35)
+yy <- exp(- exp(xx))
+lines(xx, yy, col = "red", lwd = 2)
+legend("bottomleft", c("KM estimate", "95% CI KM estimate", 
+    "Survival function of Extreme Value distribution"), 
+    lty = c(1,2,1), col = c(1,1,2), bty = "n")
+
+ptimeR <- predict(expobr, newdata=data.frame(site=factor(
+c("Cary","Conch","Looe", "Tennessee"))), type='quantile', p=pct)
+
+ptimeR <- data.frame(pish=1:dim(ptimeR)[2],t(ptimeR))
+
+names(ptimeR)<-c("pish","Cary","Conch","Looe", "Tennessee")
+
+ptimeR <- tidyr::gather(ptimeR,key=site,value=time ,Cary, Conch, Looe, Tennessee)
+
+ptimeR$years<-ptimeR$time/365
+Reefsurve <- ggplot(ptimeR,aes(x=years,y=1-pish/100,color=site)) + geom_line()+
+labs(color="site",y="Survival", x= "Time (Years)")+ggtitle("Extreme")
+
+Reefsurve
+ggpubr::ggexport(Reefsurve, filename = "extreme_sites.pdf")
+
+
+gausbr
+## check whether the assumed distribution of survival times fits the observed data sufficiently well, we can use the residuals of the model
+fitted_values <- gausbr$linear.predictors
+
+resids <- (log(gausbr$y[, 1]) - fitted_values) / gausbr$scale
+resKM <- survfit(Surv(resids, status) ~ site, data = msdor)
+dev.off()
+plot(resKM, mark.time = FALSE, xlab = "AFT Residuals", ylab = "Survival Probability")
+xx <- seq(min(resids), max(resids), length.out = 35)
+yy <- exp(- exp(xx))
+lines(xx, yy, col = "red", lwd = 2)
+legend("bottomleft", c("KM estimate", "95% CI KM estimate", 
+    "Survival function of Extreme Value distribution"), 
+    lty = c(1,2,1), col = c(1,1,2), bty = "n")
+
+ptimeR <- predict(gausbr, newdata=data.frame(site=factor(
+c("Cary","Conch","Looe", "Tennessee"))), type='quantile', p=pct)
+
+ptimeR <- data.frame(pish=1:dim(ptimeR)[2],t(ptimeR))
+
+names(ptimeR)<-c("pish","Cary","Conch","Looe", "Tennessee")
+
+ptimeR <- tidyr::gather(ptimeR,key=site,value=time ,Cary, Conch, Looe, Tennessee)
+ptimeR$years<-ptimeR$time/365
+
+Reefsurvg <- ggplot(ptimeR,aes(x=years,y=1-pish/100,color=site)) + geom_line()+
+labs(color="site",y="Survival", x= "Time (Years)")+ggtitle("Gaussian")
+
+Reefsurvg 
+ggpubr::ggexport(Reefsurvg, filename = "gaussian_sites.pdf")
+
+a<-plot_grid(Reefsurv+ theme(legend.position="none"),Reefsurvl+theme(legend.position="none"),Reefsurve+ theme(legend.position="none"), Reefsurvg+
+            theme(legend.position = "none"))
+
+a
+ggpubr::ggexport(a, filename = "ParaCurve_Reef.pdf")
+
+
+#GENOTYPE
+##############################################################
+lognbg2
+expobg
+tdisbg
+gausbg
+
+tdisbg
+## check whether the assumed distribution of survival times fits the observed data sufficiently well, we can use the residuals of the model
+fitted_values <- tdisbg$linear.predictors
+
+resids <- (log(tdisbg$y[, 1]) - fitted_values) / tdisbg$scale
+resKM <- survfit(Surv(resids, status) ~ genotype, data = msdor)
+dev.off()
+plot(resKM, mark.time = FALSE, xlab = "AFT Residuals", ylab = "Survival Probability")
+xx <- seq(min(resids), max(resids), length.out = 35)
+yy <- exp(- exp(xx))
+lines(xx, yy, col = "red", lwd = 2)
+legend("bottomleft", c("KM estimate", "95% CI KM estimate", 
+    "Survival function of Extreme Value distribution"), 
+    lty = c(1,2,1), col = c(1,1,2), bty = "n")
+
+
+ptimeG <- predict(tdisbg, newdata=data.frame(genotype=factor(c("A","B","C","D"))), type='quantile', p=pct)
+
+ptimeG <- data.frame(pish=1:dim(ptimeG)[2],t(ptimeG))
+
+names(ptimeG)<-c("pish","A","B","C","D")
+
+ptimeG <- gather(ptimeG,key=genotype,value=time,A,B,C,D)
+ptimeG$years<-ptimeG$time/365
+
+#ptimeG2<- subset(ptimeG, ptimeG$genotype!="A")
+#ptimeG2$years<-ptimeG2$time/365
+
+GenoSurvtg <- ggplot(ptimeG,aes(x=years,y=1-pish/100,color=genotype))+
+  geom_line()+
+  scale_color_manual(values = colors2)+
+ labs(color="Genotype",y="Survival", x="Time (Years)")+ggtitle("T-distribution")
+
+GenoSurvtg
+ggpubr::ggexport(GenoSurvtg, filename = "T_dist_geno.pdf")
+
+
+expobg
+## check whether the assumed distribution of survival times fits the observed data sufficiently well, we can use the residuals of the model
+fitted_values <- expobg$linear.predictors
+
+resids <- (log(expobg$y[, 1]) - fitted_values) / expobg$scale
+resKM <- survfit(Surv(resids, status) ~ genotype, data = msdor)
+dev.off()
+plot(resKM, mark.time = FALSE, xlab = "AFT Residuals", ylab = "Survival Probability")
+xx <- seq(min(resids), max(resids), length.out = 35)
+yy <- exp(- exp(xx))
+lines(xx, yy, col = "red", lwd = 2)
+legend("bottomleft", c("KM estimate", "95% CI KM estimate", 
+    "Survival function of Extreme Value distribution"), 
+    lty = c(1,2,1), col = c(1,1,2), bty = "n")
+#best fit
+
+ptimeG <- predict(expobg, newdata=data.frame(genotype=factor(c("A","B","C","D"))), type='quantile', p=pct)
+
+ptimeG <- data.frame(pish=1:dim(ptimeG)[2],t(ptimeG))
+
+names(ptimeG)<-c("pish","A","B","C","D")
+
+ptimeG <- gather(ptimeG,key=genotype,value=time,A,B,C,D)
+
+ptimeG$years<-ptimeG$time/365
+
+GenoSurvge <- ggplot(ptimeG,aes(x=years,y=1-pish/100,color=genotype))+
+  geom_line()+
+  scale_color_manual(values = colors2)+
+  labs(color="Genotype",y="Fitted Weibull Survival (% Survival)", x="Time (Years)")+ggtitle("B)")
+
+GenoSurvge
+ggpubr::ggexport(GenoSurvge, filename = "extreme_geno.pdf")
+
+
+
+lognbg2
+## check whether the assumed distribution of survival times fits the observed data sufficiently well, we can use the residuals of the model
+fitted_values <- lognbg2$linear.predictors
+
+resids <- (log(lognbg2$y[, 1]) - fitted_values) / lognbg2$scale
+resKM <- survfit(Surv(resids, status) ~ genotype, data = msdor)
+dev.off()
+plot(resKM, mark.time = FALSE, xlab = "AFT Residuals", ylab = "Survival Probability")
+xx <- seq(min(resids), max(resids), length.out = 35)
+yy <- exp(- exp(xx))
+lines(xx, yy, col = "red", lwd = 2)
+legend("bottomleft", c("KM estimate", "95% CI KM estimate", 
+    "Survival function of Extreme Value distribution"), 
+    lty = c(1,2,1), col = c(1,1,2), bty = "n")
+
+ptimeG <- predict(lognbg2, newdata=data.frame(genotype=factor(c("A","B","C","D"))), type='quantile', p=pct)
+
+ptimeG <- data.frame(pish=1:dim(ptimeG)[2],t(ptimeG))
+
+names(ptimeG)<-c("pish","A","B","C","D")
+
+ptimeG <- gather(ptimeG,key=genotype,value=time,A,B,C,D)
+
+ptimeG$years<-ptimeG$time/365
+
+GenoSurvtln <- ggplot(ptimeG,aes(x=years,y=1-pish/100,color=genotype)) + geom_line()+
+#xlim(80,250)+ 
+labs(color="Genotype",y="Survival", x="Time (Years)")+ggtitle("Logistic")
+
+GenoSurvtln
+ggpubr::ggexport(GenoSurvtln, filename = "logistic_geno.pdf")
+
+
+gausbg
+## check whether the assumed distribution of survival times fits the observed data sufficiently well, we can use the residuals of the model
+fitted_values <- gausbg$linear.predictors
+
+resids <- (log(gausbg$y[, 1]) - fitted_values) / gausbg$scale
+resKM <- survfit(Surv(resids, status) ~ genotype, data = msdor)
+dev.off()
+plot(resKM, mark.time = FALSE, xlab = "AFT Residuals", ylab = "Survival Probability")
+xx <- seq(min(resids), max(resids), length.out = 35)
+yy <- exp(- exp(xx))
+lines(xx, yy, col = "red", lwd = 2)
+legend("bottomleft", c("KM estimate", "95% CI KM estimate", 
+    "Survival function of Extreme Value distribution"), 
+    lty = c(1,2,1), col = c(1,1,2), bty = "n")
+
+
+ptimeG <- predict(gausbg, newdata=data.frame(genotype=factor(c("A","B","C","D"))), type='quantile', p=pct)
+
+ptimeG <- data.frame(pish=1:dim(ptimeG)[2],t(ptimeG))
+
+names(ptimeG)<-c("pish","A","B","C","D")
+
+ptimeG <- gather(ptimeG,key=genotype,value=time,A,B,C,D)
+
+ptimeG$years<-ptimeG$time/365
+
+
+GenoSurvGaa <- ggplot(ptimeG,aes(x=years,y=1-pish/100,color=genotype)) + geom_line()+
+#xlim(80,250)+ 
+labs(color="Genotype",y="Survival", x="Time (Years)")+ggtitle("Gaussian")
+
+GenoSurvGaa
+ggpubr::ggexport(GenoSurvGaa, filename = "gaussian_geno.pdf")
+
+
+
+aba<-plot_grid(GenoSurvtg+ theme(legend.position="none"),GenoSurvtln +theme(legend.position="none"),GenoSurvge+ theme(legend.position="none"), GenoSurvGaa+
+            theme(legend.position = "none"))
+
+#extreme is best fit
+aba
+ggpubr::ggexport(aba, filename = "ParaCurve_Geno.pdf")
+
+
+###################################################
+#interactive
+###################################################
+
+lognbi2
+expobi
+tdisbi
+gausbi
+
+lognbi2
+## check whether the assumed distribution of survival times fits the observed data sufficiently well, we can use the residuals of the model
+fitted_values <- lognbi2$linear.predictors
+
+resids <- (log(lognbi2$y[, 1]) - fitted_values) / lognbi2$scale
+resKM <- survfit(Surv(resids, status) ~ cat, data = msdor)
+dev.off()
+plot(resKM, mark.time = FALSE, xlab = "AFT Residuals", ylab = "Survival Probability")
+xx <- seq(min(resids), max(resids), length.out = 35)
+yy <- exp(- exp(xx))
+lines(xx, yy, col = "red", lwd = 2)
+legend("bottomleft", c("KM estimate", "95% CI KM estimate", 
+    "Survival function of Extreme Value distribution"), 
+    lty = c(1,2,1), col = c(1,1,2), bty = "n")
+
+
+ptimeI <- predict(lognbi2, newdata=data.frame(cat=factor(
+c("Cary A","Cary B", "Cary C","Cary D","Conch A", "Conch B", "Conch C", "Conch D","Looe A", "Looe B", "Looe C","Looe D", "Tennessee A", "Tennessee B", "Tennessee C","Tennessee D"))), type='quantile', p=pct)
+
+ptimeI <- data.frame(pish=1:dim(ptimeI)[2],t(ptimeI))
+
+names(ptimeI)<-c("pish","Cary A","Cary B", "Cary C","Cary D","Conch A", "Conch B", "Conch C", "Conch D","Looe A", "Looe B", "Looe C","Looe D", "Tennessee A", "Tennessee B", "Tennessee C","Tennessee D")
+
+ptimeI <- gather(ptimeI,key=ID,value=time ,"Cary A","Cary B", "Cary C","Cary D","Conch A", "Conch B", "Conch C", "Conch D","Looe A", "Looe B", "Looe C","Looe D", "Tennessee A", "Tennessee B", "Tennessee C","Tennessee D")
+
+
+ptimeI$years<-ptimeI$time/365
+
+Intln<-ggplot(ptimeI,aes(x=years,y=1-pish/100,color=ID)) + geom_line()+
+labs(color="Site+Genotype",y="Survival", x= "Time (Years)")+ggtitle("Logistic")
+
+Intln
+ggpubr::ggexport(Intln, filename = "logisitc_inter.pdf")
+
+
+
+
+####################################
+####################################
+
+expobi
+## check whether the assumed distribution of survival times fits the observed data sufficiently well, we can use the residuals of the model
+fitted_values <- expobi$linear.predictors
+
+resids <- (log(expobi$y[, 1]) - fitted_values) / expobi$scale
+resKM <- survfit(Surv(resids, status) ~ cat, data = msdor)
+dev.off()
+plot(resKM, mark.time = FALSE, xlab = "AFT Residuals", ylab = "Survival Probability")
+xx <- seq(min(resids), max(resids), length.out = 35)
+yy <- exp(- exp(xx))
+lines(xx, yy, col = "red", lwd = 2)
+legend("bottomleft", c("KM estimate", "95% CI KM estimate", 
+    "Survival function of Extreme Value distribution"), 
+    lty = c(1,2,1), col = c(1,1,2), bty = "n")
+
+ptimeI <- predict(expobi, newdata=data.frame(cat=factor(
+c("Cary A","Cary B", "Cary C","Cary D","Conch A", "Conch B", "Conch C", "Conch D","Looe A", "Looe B", "Looe C","Looe D", "Tennessee A", "Tennessee B", "Tennessee C","Tennessee D"))), type='quantile', p=pct)
+
+ptimeI <- data.frame(pish=1:dim(ptimeI)[2],t(ptimeI))
+
+names(ptimeI)<-c("pish","Cary A","Cary B", "Cary C","Cary D","Conch A", "Conch B", "Conch C", "Conch D","Looe A", "Looe B", "Looe C","Looe D", "Tennessee A", "Tennessee B", "Tennessee C","Tennessee D")
+
+ptimeI <- gather(ptimeI,key=ID,value=time ,"Cary A","Cary B", "Cary C","Cary D","Conch A", "Conch B", "Conch C", "Conch D","Looe A", "Looe B", "Looe C","Looe D", "Tennessee A", "Tennessee B", "Tennessee C","Tennessee D")
+
+ptimeI$years<-ptimeI$time/365
+
+IntEh<-ggplot(ptimeI,aes(x=years,y=1-pish/100,color=ID)) + geom_line()+ 
+labs(color="Site+Genotype",y="Survival", x= "Time (Years)")+ggtitle("Extreme")
+
+IntEh
+ggpubr::ggexport(IntEh, filename = "extreme_inter.pdf")
+
+
+########## 
+########## 
+
+
+tdisbi
+## check whether the assumed distribution of survival times fits the observed data sufficiently well, we can use the residuals of the model
+fitted_values <- tdisbi$linear.predictors
+
+resids <- (log(tdisbi$y[, 1]) - fitted_values) / tdisbi$scale
+resKM <- survfit(Surv(resids, status) ~ cat, data = msdor)
+dev.off()
+plot(resKM, mark.time = FALSE, xlab = "AFT Residuals", ylab = "Survival Probability")
+xx <- seq(min(resids), max(resids), length.out = 35)
+yy <- exp(- exp(xx))
+lines(xx, yy, col = "red", lwd = 2)
+legend("bottomleft", c("KM estimate", "95% CI KM estimate", 
+    "Survival function of Extreme Value distribution"), 
+    lty = c(1,2,1), col = c(1,1,2), bty = "n")
+
+
+ptimeI <- predict(tdisbi, newdata=data.frame(cat=factor(
+c("Cary A","Cary B", "Cary C","Cary D","Conch A", "Conch B", "Conch C", "Conch D","Looe A", "Looe B", "Looe C","Looe D", "Tennessee A", "Tennessee B", "Tennessee C","Tennessee D"))), type='quantile', p=pct)
+
+ptimeI <- data.frame(pish=1:dim(ptimeI)[2],t(ptimeI))
+
+names(ptimeI)<-c("pish","Cary A","Cary B", "Cary C","Cary D","Conch A", "Conch B", "Conch C", "Conch D","Looe A", "Looe B", "Looe C","Looe D", "Tennessee A", "Tennessee B", "Tennessee C","Tennessee D")
+
+ptimeI <- gather(ptimeI,key=ID,value=time ,"Cary A","Cary B", "Cary C","Cary D","Conch A", "Conch B", "Conch C", "Conch D","Looe A", "Looe B", "Looe C","Looe D", "Tennessee A", "Tennessee B", "Tennessee C","Tennessee D")
+
+ptimeI$years<-ptimeI$time/365
+
+
+Intth<-ggplot(ptimeI,aes(x=years,y=1-pish/100,color=ID)) + geom_line()+
+labs(color="Site+Genotype",y="Survival", x= "Time (Years)")+ggtitle("T-distribution")
+
+Intth
+
+ggpubr::ggexport(Intth, filename = "T_distrib_inter.pdf")
+
+
+
+#####################
+
+gausbi
+## check whether the assumed distribution of survival times fits the observed data sufficiently well, we can use the residuals of the model
+fitted_values <- gausbi$linear.predictors
+
+resids <- (log(gausbi$y[, 1]) - fitted_values) / gausbi$scale
+resKM <- survfit(Surv(resids, status) ~ cat, data = msdor)
+dev.off()
+plot(resKM, mark.time = FALSE, xlab = "AFT Residuals", ylab = "Survival Probability")
+xx <- seq(min(resids), max(resids), length.out = 35)
+yy <- exp(- exp(xx))
+lines(xx, yy, col = "red", lwd = 2)
+legend("bottomleft", c("KM estimate", "95% CI KM estimate", 
+    "Survival function of Extreme Value distribution"), 
+    lty = c(1,2,1), col = c(1,1,2), bty = "n")
+
+ptimeI <- predict(gausbi, newdata=data.frame(cat=factor(
+c("Cary A","Cary B", "Cary C","Cary D","Conch A", "Conch B", "Conch C", "Conch D","Looe A", "Looe B", "Looe C","Looe D", "Tennessee A", "Tennessee B", "Tennessee C","Tennessee D"))), type='quantile', p=pct)
+
+ptimeI <- data.frame(pish=1:dim(ptimeI)[2],t(ptimeI))
+
+names(ptimeI)<-c("pish","Cary A","Cary B", "Cary C","Cary D","Conch A", "Conch B", "Conch C", "Conch D","Looe A", "Looe B", "Looe C","Looe D", "Tennessee A", "Tennessee B", "Tennessee C","Tennessee D")
+
+ptimeI <- gather(ptimeI,key=ID,value=time ,"Cary A","Cary B", "Cary C","Cary D","Conch A", "Conch B", "Conch C", "Conch D","Looe A", "Looe B", "Looe C","Looe D", "Tennessee A", "Tennessee B", "Tennessee C","Tennessee D")
+
+
+ptimeI$years<-ptimeI$time/365
+
+
+Intgh<-ggplot(ptimeI,aes(x=years,y=1-pish/100,color=ID)) + geom_line()+
+labs(color="Site+Genotype",y="Survival", x= "Time (Years)")+ggtitle("Gaussian")
+
+Intgh
+ggpubr::ggexport(Intgh, filename = "gaussian_inter.pdf")
+
+
+Intln
+
+h<-plot_grid(Intth+ theme(legend.position="none"),Intln +theme(legend.position="none"),IntEh+ theme(legend.position="none"), Intgh+
+            theme(legend.position = "none"))
+
+h
+ggpubr::ggexport(h, filename = "ParaCurve_Int.pdf")
+```
+
+
+
+###########################
+# interactive predictions...
+#  AFT (accelerated failure time) models from the survival package is survreg()
+###########################
+```{r}
+predIntg<- survreg(Surv(time,death)~ID,data=binhealth, dist = "gaussian")
+predIntln<- survreg(Surv(time,death)~ID,data=binhealth, dist = "logistic")
+predInte<- survreg(Surv(time,death)~ID,data=binhealth, dist = "extreme")
+predIntt<- survreg(Surv(time,death)~ID,data=binhealth, dist = "t")
+
+
+
+
+## 
+predIntg
+fitted_values <- predIntg$linear.predictors
+
+resids <- (log(predIntg$y[, 1]) - fitted_values) / predIntg$scale
+resKM <- survfit(Surv(resids, death) ~ 1, data = binhealth)
+dev.off()
+plot(resKM, mark.time = FALSE, xlab = "AFT Residuals", ylab = "Survival Probability")
+xx <- seq(min(resids), max(resids), length.out = 35)
+yy <- exp(- exp(xx))
+lines(xx, yy, col = "red", lwd = 2)
+legend("bottomleft", c("KM estimate", "95% CI KM estimate", 
+    "Survival function of Extreme Value distribution"), 
+    lty = c(1,2,1), col = c(1,1,2), bty = "n")
+
+
+
+
+############################
+############################
+fit_null <- coxph(Surv(age2, status) ~ reef, data = data)
+fit_null2<- coxph(Surv(age2, status) ~genotype, data=data)
+fit_alt <- coxph(Surv(age2, status) ~ genotype * reef, data = data)
+fit_alt2<-coxph(Surv(age2,status)~ID,data=data)
+
+fit_null
+fit_null2
+fit_alt
+fit_alt2
+
+
+```
+
+
+```{r}
+reeflogn <- survreg(Surv(age2,status)~factor(reef), 
+                    data=data, dist='lognormal')
+
+reeflogl <- survreg(Surv(age2,status)~factor(reef), 
+                    data=data, dist='loglogistic')
+
+genologn <- survreg(Surv(age2,status)~factor(genotype),
+                     data=data, dist='lognormal')
+
+genologl <- survreg(Surv(age2,status)~factor(genotype), 
+                    data=data, dist='loglogistic')
+
+interlogn <- survreg(Surv(age2,status)~genotype*reef,data=data, dist='lognormal')
+
+interlogl <- survreg(Surv(age2,status)~genotype*reef,data=data, dist='loglogistic')
+
+###################################################
+### As these are full likelihood fits, we can compare the fits with AIC. I’m not sure why, but the AIC function
+#no longer works for survreg objects, so we have to #use extractAIC which does not work for multiple #objects,
+#so we neet to use sapply
+###################################################
+sapply(list(reefweib,reeflogn,reeflogl),extractAIC)
+sapply(list(genoweib,genologn,genologl),extractAIC)
+sapply(list(interweib2, interlogn, interlogl), extractAIC)
+
+###################################################
+### 
+###################################################
+survaic <- data.frame(t(sapply(list(reefweib,reeflogn,reeflogl),extractAIC)))
+names(survaic) <- c("df","AIC")
+rownames(survaic) <- c("Weibull","lognormal","loglogistic")
+survaic
+summary(reeflogn)
+#scale= 0589
+#0.068
+#####################################################
+#The best fit here is the lognormal model if we examine the #summary, we see that the scale parameter, we
+#see that it is less than one, indicating a unimodal pattern of #hazard, suggesting that over time, the seedlings
+#mortality rate increases then decreases, which probably makes #sense that corals that initially survived transplantatoin may have acclimated to the new habitats better than others (genotypes) for long term survival and have grown #larger and can better tolerate environmental fluctuations
+#####################################################
+survaic2 <- data.frame(t(sapply(list(genoweib,genologn,genologl),extractAIC)))
+names(survaic2) <- c("df","AIC")
+rownames(survaic2) <- c("Weibull","lognormal","loglogistic")
+survaic2
+summary(genologn)
+# Scale=0.829
+
+survaic3 <- data.frame(t(sapply(list(interweib2, interlogn, interlogl),extractAIC)))
+names(survaic3) <- c("df","AIC")
+rownames(survaic3) <- c("Weibull","lognormal","loglogistic")
+survaic3
+summary(interlogn)
+#Scale- 0.3993
+#
+## BEst fits are Lognormal for ALL
+############################### Log log reef
+
+rlltime <- predict(reeflogl, newdata=data.frame(reef=factor(
+               c("Cary","Conch","Looe", "Tennessee"))), type='quantile', p=pct)
+
+rlltime <- data.frame(pish=1:dim(rlltime)[2],t(rlltime))
+
+names(rlltime)<-c("pish","Cary","Conch","Looe", 
+"Tennessee")
+
+rlltime <- gather(rlltime,key=reef,value=time,Cary,Conch,Looe, Tennessee)
+
+rllplot <- ggplot(rlltime,aes(x=time,y=1-pish/100,color=reef))+ geom_line()+
+    labs(color="Reef",y="Survival",x="Time (Days)")+ggtitle("Loglogistic Hazard")
+
+rllplot
+
+library(gridExtra)
+grid.arrange(Rweihabplot,rllplot)
+
+Rweihabplot <-Rweihabplot+scale_x_continuous(limit=c(0,max(rlltime$time)))
+
+grid.arrange(Rweihabplot,rllplot)
+
+
+##################################### log normal reef
+rlntime <- predict(reeflogn, newdata=data.frame(reef=factor(
+               c("Cary","Conch","Looe", "Tennessee"))), type='quantile', p=pct)
+
+rlntime <- data.frame(pish=1:dim(rlntime)[2],t(rlntime))
+
+names(rlntime)<-c("pish","Cary","Conch","Looe", 
+"Tennessee")
+
+rlntime <- gather(rlntime,key=reef,value=time,Cary,Conch,Looe,Tennessee)
+
+rlnplot <- ggplot(rlntime,aes(x=time,y=1-pish/100,color=reef))+ geom_line()+
+    labs(color="Reef",y="Survival",x="Time (Days)")+ggtitle("Lognormal Hazard")
+rlnplot
+
+grid.arrange(Rweihabplot,rllplot,rlnplot)
+
+Rweihabplot <- Rweihabplot+scale_x_continuous(limit=c(0,max(rlntime$time)))
+
+rllplot <- rllplot+scale_x_continuous(limit=c(0,max(rlntime$time)))
+
+grid.arrange(Rweihabplot,rllplot,rlnplot)
+
+rllplot <- rllplot+ggtitle("Log Log Hazard w/o A")
+rlnplot<- rlnplot+ggtitle("Log Normal Hazard w/o A")
+grid.arrange(rllplot,rlnplot)
+###################################################Log natural genotype
+
+Glogtime <- predict(genologn, newdata=data.frame(genotype=factor(
+               c("A","B","C", "D"))), type='quantile', p=pct)
+
+Glogtime <- data.frame(pish=1:dim(Glogtime)[2],t(Glogtime))
+
+names(Glogtime)<-c("pish","A","B","C", 
+"D")
+
+Glogtime <- gather(Glogtime,key=genotype,value=time,A, B, C, D)
+##
+Glogtime2<- subset(Glogtime,Glogtime$genotype!="A")
+
+Glogtimeplot2 <- ggplot(Glogtime2,aes(x=time,y=1-pish/100,color=genotype)) + geom_line()+
+xlim(-1,5000)+ 
+labs(color="Genotype",y="Survival", x="Time (Days)")
+
+Glogtimeplot2 <- Glogtimeplot2+ggtitle("Log Normal Hazard w/o A")
+
+grid.arrange(Gweihabplot,Glogtimeplot2)
+
+Gweihabplot <-Gweihabplot+scale_x_continuous(limit=c(0,max(Glogtime2$time)))
+
+
+### With A
+GlogtimeA<- subset(Glogtime,Glogtime$genotype=="A")
+
+GlogtimeplotA <- ggplot(GlogtimeA,aes(x=time,y=1-pish/100,color=genotype)) + geom_line()+
+labs(color="Genotype",y="Survival", x="Time (Days)")
+
+GlogtimeplotA <- GlogtimeplotA+ggtitle("Log Normal Hazard (A)")
+
+GlogtimeplotA
+
+grid.arrange(GweihabplotA,GlogtimeplotA,GloglogtimeplotA)
+
+
+################### Log Log genotype
+Gloglogtime <- predict(genologl, newdata=data.frame(genotype=factor(
+               c("A","B","C", "D"))), type='quantile', p=pct)
+
+Gloglogtime <-data.frame(pish=1:dim(Gloglogtime)[2],t(Gloglogtime))
+
+names(Gloglogtime)<-c("pish","A","B","C", 
+"D")
+
+Gloglogtime <- gather(Gloglogtime,key=genotype,value=time,A, B, C, D)
+##
+Gloglogtime2<-subset(Gloglogtime,Gloglogtime$genotype!="A")
+
+Gloglogtimeplot2 <- ggplot(Gloglogtime2,aes(x=time,y=1-pish/100,color=genotype)) + geom_line()+
+xlim(-1,5000)+ 
+labs(color="Genotype",y="Survival", x="Time (Days)")
+
+Gloglogtimeplot2 <- Gloglogtimeplot2+ggtitle("Log Log Hazard w/o A")
+
+Gloglogtimeplot2
+
+
+grid.arrange(Gweihabplot,Glogtimeplot2,Gloglogtimeplot2)
+
+Glogtimeplot2
+### With A
+GloglogtimeA<- subset(Gloglogtime,Gloglogtime$genotype=="A")
+
+GloglogtimeplotA <- ggplot(GloglogtimeA,aes(x=time,y=1-pish/100,color=genotype)) + geom_line()+
+labs(color="Genotype",y="Survival", x="Time (Days)")
+
+GloglogtimeplotA <- GloglogtimeplotA+ggtitle("Log log Hazard (A)")
+
+GloglogtimeplotA
+
+############################log log interaction
+############################
+#(geno*reef)graphs I have to make ID (reef*genotype) the main variable
+
+interlognID <- survreg(Surv(age2,status)~ID,data=data, dist='lognormal')
+
+interloglID <- survreg(Surv(age2,status)~ID,data=data, dist='loglogistic')
+
+ptimeIloglog <- predict(interloglID, newdata=data.frame(ID=factor(
+c("Cary_A","Cary_B", "Cary_C","Cary_D","Conch_A", "Conch_B", "Conch_C", "Conch_D","Looe_A", "Looe_B", "Looe_C","Looe_D", "Tennessee_A", "Tennessee_B", "Tennessee_C","Tennessee_D"))), type='quantile', p=pct)
+
+ptimeIloglog <- data.frame(pish=1:dim(ptimeIloglog)[2],t(ptimeIloglog))
+
+names(ptimeIloglog)<-c("pish","Cary_A","Cary_B", "Cary_C","Cary_D","Conch_A", "Conch_B", "Conch_C", "Conch_D","Looe_A", "Looe_B", "Looe_C","Looe_D", "Tennessee_A", "Tennessee_B", "Tennessee_C","Tennessee_D")
+
+ptimeIloglog <- gather(ptimeIloglog,key=ID,value=time ,"Cary_A","Cary_B", "Cary_C","Cary_D","Conch_A", "Conch_B", "Conch_C", "Conch_D","Looe_A", "Looe_B", "Looe_C","Looe_D", "Tennessee_A", "Tennessee_B", "Tennessee_C","Tennessee_D")
+
+ploglogtimehigh<- subset(ptimeIloglog, ptimeIloglog$ID==(c("Tennessee_A", "Tennessee_C", "Cary_D", "Cary_A", "Cary_C", "Looe_A", "Looe_B", "Looe_C", "Conch_A", "Conch_B", "Conch_D")))
+
+#125000 Tennessee_A, C
+#200000 Cary_D & A & C Looe_A, B, C Conch_A B D
+#
+#600 Cary_B Looe_D Conch_C
+#400 Tenn_D
+#250 Tenn_B
+
+ptimeIloglogplot <-ggplot(ploglogtimehigh,aes(x=time,y=1-pish/100,color=ID)) + geom_line()+
+labs(color="Reef*Genotype",y="Survival", x= "Time (days)")
+
+ptimeIloglogplot <- ptimeIloglogplot+ggtitle("Loglog Hazard")
+
+ptimeIloglogplot
+####################################
+####################################
+
+ploglogtimelow<- subset(ptimeIloglog, ptimeIloglog$ID==(c("Cary_B", "Looe_D","Conch_C", "Tennessee_D", "Tennessee_B")))
+
+
+ptimeIloglogplotlow <-ggplot(ploglogtimelow,aes(x=time,y=1-pish/100,color=ID)) + geom_line()+labs(color="Reef*Genotype",y="Survival", x= "Time (days)")
+
+ptimeIloglogplotlow <- ptimeIloglogplotlow+ggtitle("Loglog Hazard")
+
+ptimeIloglogplotlow
+
+############################log normal interaction (geno*reef)
+
+interlognID <-survreg(Surv(age2,status)~ID,data=data, dist='lognormal')
+
+ptimeIlogn <- predict(interlognID, newdata=data.frame(ID=factor(
+c("Cary_A","Cary_B", "Cary_C","Cary_D","Conch_A", "Conch_B", "Conch_C", "Conch_D","Looe_A", "Looe_B", "Looe_C","Looe_D", "Tennessee_A", "Tennessee_B", "Tennessee_C","Tennessee_D"))), type='quantile', p=pct)
+
+ptimeIlogn <- data.frame(pish=1:dim(ptimeIlogn)[2],t(ptimeIlogn))
+
+names(ptimeIlogn)<-c("pish","Cary_A","Cary_B", "Cary_C","Cary_D","Conch_A", "Conch_B", "Conch_C", "Conch_D","Looe_A", "Looe_B", "Looe_C","Looe_D", "Tennessee_A", "Tennessee_B", "Tennessee_C","Tennessee_D")
+
+ptimeIlogn <- gather(ptimeIlogn,key=ID,value=time ,"Cary_A","Cary_B", "Cary_C","Cary_D","Conch_A", "Conch_B", "Conch_C", "Conch_D","Looe_A", "Looe_B", "Looe_C","Looe_D", "Tennessee_A", "Tennessee_B", "Tennessee_C","Tennessee_D")
+
+
+ploglogtimehigh<- subset(ptimeIlogn, ptimeIlogn$ID==(c("Tennessee_A", "Tennessee_C", "Cary_D", "Cary_A", "Cary_C", "Looe_A", "Looe_B", "Looe_C", "Conch_A", "Conch_B", "Conch_D")))
+
+#125000 Tennessee_A, C
+#200000 Cary_D & A & C Looe_A, B, C Conch_A B D
+#
+#600 Cary_B Looe_D Conch_C
+#400 Tenn_D
+#250 Tenn_B
+
+ptimeIlognplot <-ggplot(ploglogtimehigh,aes(x=time,y=1-pish/100,color=ID)) + geom_line()+
+labs(color="Reef*Genotype",y="Survival", x= "Time (days)")
+
+ptimeIlognplot <- ptimeIlognplot+ggtitle("Lognormal Hazard")
+
+ptimeIlognplot
+####################################
+####################################
+
+ploglogtimelow<- subset(ptimeIlogn, ptimeIlogn$ID==(c("Cary_B", "Looe_D","Conch_C", "Tennessee_D", "Tennessee_B")))
+
+
+ploglogtimelowplot <-ggplot(ploglogtimelow,aes(x=time,y=1-pish/100,color=ID)) + geom_line()+labs(color="Reef*Genotype",y="Survival", x= "Time (days)")
+
+ploglogtimelowplot <- ploglogtimelowplot+ggtitle("Lognormal Hazard")
+
+ploglogtimelowplot
+
+grid.arrange(ptimeIloglogplotlow,ptimeIlognplot,ploglogtimelowplot)
+```
+
+
+```{r}
+
+Rxn <- read_excel("C:/Github/Orbicella_FL/Raw Data/site_geno_sur.xlsx")
+Rxnd <- read_excel("C:/Github/Orbicella_FL/Raw Data/site_geno_sur_Dec.xlsx")
+Rxn$site<-as.factor(Rxn$site)
+Rxn$genotype<-as.factor(Rxn$genotype)
+Rxnd$site<-as.factor(Rxnd$site)
+Rxnd$genotype<-as.factor(Rxnd$genotype)
+
+Rxn <- within(Rxn, site <- relevel(site, ref = 2)) 
+Rxn <- within(Rxn, site <- relevel(site, ref = 3)) 
+
+gd <- Rxn %>% 
+        group_by(site,genotype) %>% 
+        summarise(surv = mean(surv))
+gd
+
+gdd <- Rxnd %>% 
+        group_by(site,genotype) %>% 
+        summarise(surv = mean(surv))
+gdd
+
+Rxn2 <- Rxn %>% 
+  group_by(site, genotype) %>% 
+  mutate(avg = mean(surv))
+
+
+RXnplot<-ggplot(gd, aes(x = site, y = surv, color= genotype)) +
+  geom_point(stat = "identity", size =3, position=position_jitter(h=.005,w=0.25))+
+  theme_classic()+
+  scale_colour_manual(values=colors2) +
+  guides(color = guide_legend("Genotype"),  shape = guide_legend("Genotype")) +
+  labs(
+    title = "GxE Survival",
+    x = "Reef",
+    y = "Average Survival"
+  )+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))
+
+RXnplot
+ggexport(RXnplot, filename = "RXnplot.pdf")
+
+
+RXnplotd<-ggplot(gdd, aes(x = site, y = surv, color= genotype)) +
+  geom_point(stat = "identity", size =3, position=position_jitter(h=.005,w=0.25))+
+  theme_classic()+
+  scale_colour_manual(values=colors2) +
+  guides(color = guide_legend("Genotype"),  shape = guide_legend("Genotype")) +
+  labs(
+    title = "GxE Survival",
+    x = "Reef",
+    y = "Average Survival"
+  )+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))
+
+RXnplotd
+ggexport(RXnplotd, filename = "RXnplotd.pdf")
+#### side by side Conch and Looe
+
+RxnCL<-subset(Rxn, site %in% c("Conch", "Looe"))
+
+gdCL <- RxnCL %>% 
+        group_by(site,genotype) %>% 
+        summarise(surv = mean(surv))
+gdCL
+
+RXnplotCL<-ggplot(gdCL, aes(x = site, y = surv, color= genotype)) +
+  geom_point(stat = "identity", size =3, position=position_jitter(h=.005,w=0.25))+
+  theme_classic()+
+  scale_colour_manual(values=colors2) +
+  guides(color = guide_legend("Genotype"),  shape = guide_legend("Genotype")) +
+  labs(
+    title = "GxE Survival",
+    x = "Reef",
+    y = "Average Survival"
+  )+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))
+
+RXnplotCL
+ggexport(RXnplotCL, filename = "RXnplotCL.pdf")
+
+
+
+RxnCLd<-subset(Rxnd, site %in% c("Conch", "Looe"))
+
+gdCLd <- RxnCLd %>% 
+        group_by(site,genotype) %>% 
+        summarise(surv = mean(surv))
+gdCLd
+
+RXnplotCLd<-ggplot(gdCLd, aes(x = site, y = surv, color= genotype)) +
+  geom_point(stat = "identity", size =3, position=position_jitter(h=.005,w=0.25))+
+  theme_classic()+
+  scale_colour_manual(values=colors2) +
+  guides(color = guide_legend("Genotype"),  shape = guide_legend("Genotype")) +
+  labs(
+    title = "GxE Survival",
+    x = "Reef",
+    y = "Average Survival"
+  )+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))
+
+RXnplotCLd
+ggexport(RXnplotCLd, filename = "RXnplotCLd.pdf")
+
+#############Conch Cary
+
+RxnCC<-subset(Rxn, site %in% c("Conch", "Cary"))
+
+
+gdCC<- RxnCC %>% 
+        group_by(site,genotype) %>% 
+        summarise(surv = mean(surv))
+gdCC
+
+RXnplotCC<-ggplot(gdCC, aes(x = site, y = surv, color= genotype)) +
+  geom_point(stat = "identity", size =3, position=position_jitter(h=.005,w=0.25))+
+  theme_classic()+
+  scale_colour_manual(values=colors2) +
+  guides(color = guide_legend("Genotype"),  shape = guide_legend("Genotype")) +
+  labs(
+    title = "GxE Survival",
+    x = "Reef",
+    y = "Average Survival"
+  )+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))
+
+RXnplotCC
+ggexport(RXnplotCC, filename = "RXnplotCC.pdf")
+
+
+RxnCCd<-subset(Rxnd, site %in% c("Conch", "Cary"))
+
+
+gdCCd<- RxnCCd %>% 
+        group_by(site,genotype) %>% 
+        summarise(surv = mean(surv))
+gdCCd
+
+RXnplotCCd<-ggplot(gdCCd, aes(x = site, y = surv, color= genotype)) +
+  geom_point(stat = "identity", size =3, position=position_jitter(h=.005,w=0.25))+
+  theme_classic()+
+  scale_colour_manual(values=colors2) +
+  guides(color = guide_legend("Genotype"),  shape = guide_legend("Genotype")) +
+  labs(
+    title = "GxE Survival",
+    x = "Reef",
+    y = "Average Survival"
+  )+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))
+
+RXnplotCCd
+ggexport(RXnplotCCd, filename = "RXnplotCCd.pdf")
+
+#############Conch Tennessee
+
+RxnCT<-subset(Rxn, site %in% c("Conch", "Tennessee"))
+
+
+gdCT<- RxnCT %>% 
+        group_by(site,genotype) %>% 
+        summarise(surv = mean(surv))
+gdCT
+
+RXnplotCT<-ggplot(gdCT, aes(x = site, y = surv, color= genotype)) +
+  geom_point(stat = "identity", size =3, position=position_jitter(h=.005,w=0.25))+
+  theme_classic()+
+  scale_colour_manual(values=colors2) +
+  guides(color = guide_legend("Genotype"),  shape = guide_legend("Genotype")) +
+  labs(
+    title = "GxE Survival",
+    x = "Reef",
+    y = "Average Survival"
+  )+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))
+
+RXnplotCT
+ggexport(RXnplotCT, filename = "RXnplotCT.pdf")
+
+
+RxnCTd<-subset(Rxnd, site %in% c("Conch", "Tennessee"))
+
+
+gdCTd<- RxnCTd %>% 
+        group_by(site,genotype) %>% 
+        summarise(surv = mean(surv))
+gdCTd
+
+RXnplotCTd<-ggplot(gdCTd, aes(x = site, y = surv, color= genotype)) +
+  geom_point(stat = "identity", size =3, position=position_jitter(h=.005,w=0.25))+
+  theme_classic()+
+  scale_colour_manual(values=colors2) +
+  guides(color = guide_legend("Genotype"),  shape = guide_legend("Genotype")) +
+  labs(
+    title = "GxE Survival",
+    x = "Reef",
+    y = "Average Survival"
+  )+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))
+
+RXnplotCTd
+ggexport(RXnplotCTd, filename = "RXnplotCTd.pdf")
+
+#ggplot(Rxn2, aes(x = site, y = surv, color = genotype)) +
+#  geom_point(alpha = .4) +
+#  geom_point(data = gd, size = 4, position=position_jitter(h=.005,w=0.25))+
+#  theme_classic()
+
+
+
+
+#Rxplot<-ggplot(Rxn2, aes(x = site, y =surv, colour = genotype)) +
+#  geom_point()+
+#  geom_jitter()+
+#  geom_point(data=gd, stat= "identity", shape= 6)+
+#  scale_colour_manual(values=colors2)+
+#  theme_classic()+
+#  ylab("Avgerage Survival (%)")
+#Rxplot
+
+
+```
+

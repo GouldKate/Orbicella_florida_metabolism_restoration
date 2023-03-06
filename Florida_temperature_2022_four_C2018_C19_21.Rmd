@@ -1,0 +1,3983 @@
+---
+title: "Temperature data Florida"
+output: html_document
+date: "2022-09-15"
+editor_options: 
+  chunk_output_type: console
+---
+https://rpubs.com/cgb-grupstra/moorea-hobo-20190314
+
+testtemp<-temp_data_bysite%>%
+  filter(month=="Aug", year==2019, day==3, sitename== "Tennessee ")%>%
+  summarise(m=mean(tempC), sd= sd(tempC))
+testtemp
+
+temp_data_fullrange <- DF %>%
+  group_by(year, month, day, sitename,date)%>%
+  summarise(min_temp = min(tempC), max_temp = max(tempC))%>%
+  mutate(range = max_temp-min_temp)
+  
+  
+  
+```{r setup, include=FALSE}
+library(tidyverse)
+library(reshape2)
+library(cowplot)
+library(magrittr)
+library(lubridate)
+library(ggplot2)
+library(ggpubr)
+library(rstatix)
+```
+
+```{r}
+setwd("C:/Github/Orbicella_FL/Raw Data")
+temp_data_bysite <- read.csv("temp_data_bysite.csv")
+#CREMPtemp<- read.csv("CREMP_Temperature_Conch2018.txt")
+```
+
+```{r}
+head(temp_data_bysite)
+#head(CREMPtemp)
+
+str(temp_data_bysite)
+#str(CREMPtemp)
+
+temp_data_bysite$siteid<-as.factor(temp_data_bysite$siteid)
+temp_data_bysite$sitename<-as.factor(temp_data_bysite$sitename)
+temp_data_bysite$year<-as.factor(temp_data_bysite$year)
+#CREMPtemp$siteid<-as.factor(CREMPtemp$siteid)
+#CREMPtemp$sitename<-as.factor(CREMPtemp$sitename)
+
+#### combine day month year into new coloumn and make date
+#temp_data_bysite$date<-make_date(year = temp_data_bysite$year, month = temp_data_bysite$month, day = temp_data_bysite$day)
+temp_data_bysite$date<-as.Date(with(temp_data_bysite,paste(year,month,day,sep="-")),"%Y-%m-%d")
+head(temp_data_bysite)
+#CREMPtemp$date<-make_date(year = CREMPtemp$Year, month = CREMPtemp$Month, day = CREMPtemp$Day)
+
+#temp_data_bysite$siteid <- gsub("50", "Carysfort", projectdf$ProjectSubject)
+#temp_data_bysite$date<-as.Date(with(temp_data_bysite,paste(year,month,day,sep="-")),"%Y-%m-%d")
+
+#remove Deep conch values
+#CREMPtemps<-subset(CREMPtemp, sitename=="Conch Shallow")
+#head(CREMPtemps)
+#remove Shallow from Sitenames
+temp_data_bysite<-temp_data_bysite %>%
+    mutate(sitename = str_remove_all(sitename, "Shallow"))
+#CREMPtemps<-CREMPtemps %>%
+    #mutate(sitename = str_remove_all(sitename, "Shallow"))
+#Conchtemps<-subset(temp_data_bysite, sitename=="Conch ")
+#str(Conchtemps)
+#Conchtemps$sitename<-as.factor(CREMPtemps$sitename)
+
+#make numeric months named
+mymonths <- c("Jan","Feb","Mar",
+              "Apr","May","Jun",
+              "Jul","Aug","Sep",
+              "Oct","Nov","Dec")
+#add abbreviated month name
+temp_data_bysite$month <- mymonths[ temp_data_bysite$month ]
+#CREMPtemps$Month <- mymonths[ CREMPtemps$Month ]
+#Conchtemps$month <- mymonths[ Conchtemps$month ]
+
+
+#setwd("C:/Github/Orbicella_FL/R_dataOutput")
+#
+#write.csv(temp_data_bysite,"C:/Github/Orbicella_FL/R_dataOutput/temp_data_bysiteedited.csv")
+#write.csv(CREMPtemps,"C:/Github/Orbicella_FL/R_dataOutput/CREMPtempsedited.csv")
+#write.csv(Conchtemps,"C:/Github/Orbicella_FL/R_dataOutput/Conchtempsedited.csv")
+
+
+
+#temp_data_bysite <- read.csv("temp_data_bysiteedited.csv")
+
+```
+
+Raw temperature data
+```{r}
+
+setwd("C:/Github/Orbicella_FL/Graphs")
+
+ntempgraph <- ggplot(data=temp_data_bysite, 
+    aes(x=date,y=tempC, colour=sitename)) +
+    geom_point(size=1, alpha = 1/10)+ theme_bw()+
+    facet_grid(fct_relevel(sitename, "Carysfort", "Conch", "Looe Key", "Tennessee")~sitename)+ 
+    theme(axis.text.x = element_text(angle=45, margin = margin(t=20, r=100)))+
+    labs(title="Raw temperature data", y="Temperature (°C)", x="Date")
+ntempgraph
+
+ggexport(ntempgraph, filename = "raw_dailytemps.pdf")
+
+ntempgraph <- ggplot(data=CREMPtemps, 
+    aes(x=date,y=AvgOfTemp.C, colour=sitename)) +
+    geom_point(size=1, alpha = 1/10)+ theme_bw()+
+    theme(axis.text.x = element_text(angle=45, margin = margin(t=20, r=100)))+
+    labs(title="Raw temperature data 2018", y="Temperature (°C)", x="Date")+
+  theme_classic()
+ntempgraph
+
+ggexport(ntempgraph, filename = "raw_dailytempsconch2018.pdf")
+
+ntempgraph <- ggplot(data=Conchtemps, 
+    aes(x=date,y=tempC, colour=sitename)) +
+    geom_point(size=1, alpha = 1/10)+ theme_bw()+
+    theme(axis.text.x = element_text(angle=45, margin = margin(t=20, r=100)))+
+    labs(title="Raw temperature data 2019-2021", y="Temperature (°C)", x="Date")+
+  theme_classic()
+ntempgraph
+
+ggexport(ntempgraph, filename = "raw_dailytempsconch2019_21.pdf")
+
+```
+
+In this section I will analyse average temperature values across sites and zones. First I will manipulate the dataset to calculate daily means, then I will visualize these data and test for significance.
+
+Calculate daily means for temperature
+I want to calculate daily temperature means for each site and zone. I am using the group_by() and summarise() function to do this.
+
+```{r}
+
+#Subset temp_data_bysite for just 2019 temperatures
+temp2019<-subset(temp_data_bysite, year=="2019")
+head(temp2019)
+
+# get daily mean for each site
+
+#All_temp <- temp_data_bysite %>%
+#  group_by(sitename, date) %>%
+#  mutate(mean = mean(tempC)) %>%
+#  distinct(sitename, date, mean, month, year)
+
+
+head(All_temp)
+str(All_temp)
+
+############################ 2019
+All_temp2019 <- temp2019 %>%
+  group_by(sitename, date) %>%
+  mutate(mean = mean(tempC)) %>%
+  distinct(sitename, date, mean, month, year)
+      
+
+head(All_temp2019)     
+################################            
+#All_tempC <- CREMPtemps %>%
+ # group_by(date) %>%
+  #mutate(mean = mean(AvgOfTemp.C)) %>%
+  #distinct(date, mean, Month, Year)
+
+
+#head(All_tempC)
+#str(All_tempC)
+
+#All_tempConch <- Conchtemps %>%
+#  group_by(sitename, date) %>%
+#  mutate(mean = mean(tempC)) %>%
+#  distinct(sitename, date, mean, month, year)
+#
+#
+#head(All_tempConch)
+#str(All_tempConch)
+
+```
+
+
+2019 data
+
+```{r}
+test<-temp2019%>%group_by(sitename, date)%>%
+  mutate(mean= mean(tempC), sd= sd(tempC))%>%
+  distinct(sitename, date, mean, month, year,sd)
+
+test
+
+All_temp2019 <- temp2019 %>%
+  group_by(sitename, date) %>%
+  mutate(mean = mean(tempC), sd= sd(tempC)) %>%
+  distinct(sitename, date, mean, month, year, sd)
+
+All_temp2019
+
+#yearly means
+yearmeans2019<-group_by(All_temp2019, sitename, year) %>% summarise(m = mean(mean), sd = sd(mean, na.rm=TRUE))
+
+yearmeans2019  
+#sitename         m    sd
+#  <fct>        <dbl> <dbl>
+#1 "Carysfort "  27.5  2.22
+#2 "Conch "      27.6  2.20
+#3 "Looe Key "   27.6  2.30
+#4 "Tennessee "  27.6  2.26
+
+#monthly means
+month2019<-All_temp2019%>%group_by(month, year, sitename) %>% summarise(m = mean(mean), sd = sd(mean, na.rm=TRUE))
+month2019
+View(month2019)
+
+write.csv(month2019,"C:/Github/Orbicella_FL/R_dataOutput/monthlymeans2019.csv")
+
+
+#daily means
+daily2019<-temp2019%>%group_by(date, month, year, sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+daily2019
+
+temp2019$sitename<-as.factor(temp2019$sitename)
+######################## Yearly temperature difference 
+tempmod19<-lm(tempC~sitename,temp2019)
+summary(tempmod19)
+#0.00636
+temp2019co <- within(temp2019, sitename <- relevel(sitename, ref =2 )) 
+tempmod19<-lm(tempC~sitename,temp2019co)
+summary(tempmod19)
+#NA 
+temp2019tenn <- within(temp2019, sitename <- relevel(sitename, ref =4 )) 
+tempmod19<-lm(tempC~sitename,temp2019tenn)
+summary(tempmod19)
+# 0.01 carysfort
+temp2019loo <- within(temp2019, sitename <- relevel(sitename, ref =3 )) 
+tempmod19<-lm(tempC~sitename,temp2019loo)
+summary(tempmod19)
+# 0.000659 Looe
+
+tempmod19<-lm(tempC~sitename,temp2019)
+summary(tempmod19)
+#0.00659= Looe
+#0.015= Tenn
+# NSD between carys and Conch
+TukeyHSD(aov(tempmod19))
+#Looe carys- 0.0036
+
+
+dailytempmod<- lm(m~sitename*date,daily2019)
+summary(dailytempmod)
+TukeyHSD(aov(dailytempmod))
+
+#No diff in daily
+##non-parametric
+#res.kruskal2 <- temp2019 %>% kruskal_test(tempC ~ sitename)
+#res.kruskal2
+##0.000116 N=20.8
+#pwcCP <- temp2019 %>% 
+#  dunn_test(tempC ~ sitename, p.adjust.method = "bonferroni") 
+#pwcCP
+##carys- Looe0.0000778
+##Carys-Tenn 0.00729
+#
+#kruskal.test(tempC ~ sitename,temp2019)
+##0.0001155
+#x<-temp2019$sitename
+#y<-temp2019$tempC
+#pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+#Conch- Cary
+#Cary-Tenn
+
+# by month
+monmod19 <- lm(tempC~sitename* month, data=temp2019)
+summary(monmod19)
+HSDmon19<-TukeyHSD(monmod19)
+HSDmon19
+# only tenn and Conch are the same
+
+# Tennessee and Conch had the only significanly similar temperature
+colors2 <-  thematic::okabe_ito(4)
+
+Alltempplot2019<-ggplot(temp2019, aes(x = date, y = tempC, colour = sitename)) +
+   #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_rect(aes(xmin = as.Date("2019-02-05", "%Y-%m-%d"), xmax= as.Date("2019-02-08", "%Y-%m-%d"), ymin = -Inf, ymax = Inf), fill= '#CC79A7', alpha=0.040) +
+      geom_rect(aes(xmin = as.Date("2019-05-27", "%Y-%m-%d"), xmax= as.Date("2019-05-29", "%Y-%m-%d"), ymin = -Inf, ymax = Inf), fill= '#D55E00', alpha=0.040)+
+     geom_rect(aes(xmin = as.Date("2019-08-02", "%Y-%m-%d"), xmax= as.Date("2019-08-05", "%Y-%m-%d"), ymin = -Inf, ymax = Inf), fill= '#009E73', alpha=0.040) +
+     geom_rect(aes(xmin = as.Date("2019-12-14", "%Y-%m-%d"), xmax= as.Date("2019-12-17", "%Y-%m-%d"), ymin = -Inf, ymax = Inf), fill= '#56B4E9', alpha=0.040) +
+  geom_smooth(aes(fill=sitename), alpha=0.05)+
+  geom_point(aes(fill=sitename), size=1, alpha = 1/50)+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Daily temperature (°C)")+
+  xlab("")+
+   theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))
+  #geom_hline(data=all_avrg, aes(yintercept = m, col=sitename))
+  Alltempplot2019
+
+ggexport(Alltempplot2019, filename = "Alltempplot2019.pdf")
+
+Alltempplot2019f<-ggplot(test, aes(x = date, y = tempC, colour = sitename)) +
+  geom_ribbon(aes(ymin=mean-sd, ymax=mean+sd, fill=sitename, alpha=0.05))+
+  #geom_smooth(aes(fill=sitename), alpha=0.05)+
+  geom_point(aes(fill=sitename), size=1, alpha = 1/10)+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Daily temperature (°C)")+
+  xlab("")+
+   theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))+
+  facet_wrap(~sitename)
+  Alltempplot2019f
+
+ggexport(Alltempplot2019f, filename = "Alltempplot2019facet.pdf")
+
+Alltempplot2019f2<-ggplot(daily2019, aes(x = date, y = m, colour = sitename)) +
+  geom_line(color="black")+
+  #geom_point(aes(fill=sitename), size=1, alpha = 1)+
+  geom_ribbon(aes(ymin=m-sd, ymax=m+sd, fill=sitename, alpha=0.05))+
+  #geom_smooth(aes(fill=sitename), alpha=0.05)+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Daily mean temperature (°C)")+
+  xlab("")+
+   theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))+
+  facet_wrap(~sitename)
+  Alltempplot2019f2
+
+ggexport(Alltempplot2019f2, filename = "Alltempplot2019facet.pdf")
+
+
+
+plot1<- ggplot(data=daily2019, aes(x=date, y=m, color = sitename)) +
+    geom_line()+
+     geom_ribbon(aes(y=m, ymin=m-sd, ymax=m+sd), alpha= 0.45)+
+ xlab('') +
+     scale_y_continuous(limits = c(20, 33))+
+     scale_x_date(date_breaks= "3 months", date_labels = "%b %Y")+
+  ylab(expression("Average daily temperature " ( degree*C)))+
+  theme_classic()+
+  facet_wrap(~sitename)
+
+plot1
+
+Alltempplot2019<-ggplot(test, aes(x = date, y = mean, colour = sitename)) +
+    geom_rect(aes(xmin = as.Date("2019-02-05", "%Y-%m-%d"), xmax= as.Date("2019-02-08", "%Y-%m-%d"), ymin = -Inf, ymax = Inf), fill= '#CC79A7', alpha=0.040) +
+      geom_rect(aes(xmin = as.Date("2019-05-27", "%Y-%m-%d"), xmax= as.Date("2019-05-29", "%Y-%m-%d"), ymin = -Inf, ymax = Inf), fill= '#D55E00', alpha=0.040)+
+     geom_rect(aes(xmin = as.Date("2019-08-02", "%Y-%m-%d"), xmax= as.Date("2019-08-05", "%Y-%m-%d"), ymin = -Inf, ymax = Inf), fill= '#009E73', alpha=0.040) +
+    geom_rect(aes(xmin = as.Date("2019-12-14", "%Y-%m-%d"), xmax= as.Date("2019-12-17", "%Y-%m-%d"), ymin = -Inf, ymax = Inf), fill= '#56B4E9', alpha=0.040) +
+  #geom_line()+
+  geom_ribbon(aes(y=mean, ymin=mean-sd, ymax=mean+sd, fill=sitename), alpha= 0.04)+
+  #geom_point(aes(fill=sitename), size=1, alpha = 1/50)+
+  #scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Daily average temperature (°C)")+
+  xlab("")+
+   theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))+
+  stat_compare_means(label.y=33, method = "kruskal.test")
+  #geom_hline(data=all_avrg, aes(yintercept = m, col=sitename))
+  Alltempplot2019
+
+ggexport(Alltempplot2019, filename = "Alltempplot2019censor.pdf")
+```
+
+2019 Range 
+
+```{r}
+d319<-temp2019%>%group_by(sitename,date,day)%>%
+  mutate(min = min(tempC), max = max(tempC),mean =mean(tempC), sd= sd(tempC))%>%
+  mutate(range = max-min) %>%
+  distinct(sitename, date, month, year, mean, sd, min, max, range)
+
+d319
+
+View(d319)
+
+
+d319M<-temp2019%>%group_by(sitename,month)%>%
+  mutate(min = min(tempC), max = max(tempC),mean =mean(tempC), sd= sd(tempC))%>%
+  mutate(range = max-min) %>%
+  distinct(sitename, month, year, mean, sd, min, max, range)
+
+d319M
+View(d319M)
+
+Mon<- group_by(d319, sitename, month) %>% summarise(m = mean(mean))
+Monm<- group_by(d319, sitename, month) %>% summarise(m = mean(max))
+View(Mon)
+View(Monm)
+
+#Aug Mean
+#Tennessee  Looe Key  Carysfort  Conch 
+#30.60367   30.56591  30.56374   30.54692
+##July Mean
+#Looe Key  Carysfort  Tennessee   Conch 
+#30.44647  30.42770   30.42294    30.25937
+  
+#Mean Max
+#aug
+#Conch    Carysfort  Tennessee  Looe Key 
+#31.01323 30.96806   30.94129   30.90903
+##July
+#Carysfort Tennessee  Looe Key   Conch 
+#30.85935  30.85323   30.82484   30.67839
+
+max(temp2019$tempC)
+
+maxM<-temp2019 %>%
+  group_by(sitename, month) %>%
+  summarise(max = max(tempC, na.rm=TRUE))
+View(maxM)
+
+minM<-temp2019 %>%
+  group_by(sitename, month) %>%
+  summarise(min = min(tempC, na.rm=TRUE))
+View(minM)
+#################################### yearly means
+tempmod19m<-lm(mean~sitename,d319)
+summary(tempmod19m)
+#2e-16 Daily means differ from Carysfort 
+TukeyHSD(aov(tempmod19m))
+# Carys-Looe
+# Warmest- Looe- Tenne- Conch- Cary
+
+tempmod19m<-lm(tempC~month,temp2019)
+summary(tempmod19m)
+TukeyHSD(aov(tempmod19m))
+# temp differed every month
+
+tempmod19m<-lm(tempC~month*sitename,temp2019)
+summary(tempmod19m)
+# temp differed every monthx every site
+
+kruskal.test(mean ~ sitename,d319)
+#7.365e-05 21.747 df=3
+x<-d319$sitename
+y<-d319$mean
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+#looe-Cary
+#0.0000
+#################################### Monthly
+tempmod19m<-lm(mean~sitename,d319M)
+summary(tempmod19m)
+#2e-16
+TukeyHSD(tempmod19m)
+
+tempmod19m<-lm(range~sitename,d319)
+summary(tempmod19m)
+#1.02e-13 
+TukeyHSD(aov(tempmod19m))
+
+tempmod19m<-lm(min~sitename,d319M)
+summary(tempmod19m)
+#2e-16
+TukeyHSD(aov(tempmod19m))
+
+tempmod19m<-lm(max~sitename,d319M)
+summary(tempmod19m)
+#2e-16
+TukeyHSD(aov(tempmod19m))
+####################################
+tempmod19x<-aov(max~sitename,d319)
+summary(tempmod19x)
+#0.00189
+TukeyHSD(tempmod19x)
+# Conch-Carys 0.002
+#Looe- Cary- 0.01
+# tenn cary- 0.0255
+
+kruskal.test(max ~ sitename,d319)
+#0.0003647 18.395 df=3
+x<-d319$sitename
+y<-d319$max
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+#Conch- Cary
+#Looe- Cary
+#Tenn-Cary
+# cary had hottest max temp in 2019- 32.3 mean max
+
+####################################
+tempmod19<-aov(min~sitename,d319)
+summary(tempmod19)
+#0.00148
+TukeyHSD(tempmod19)
+# Looe-conch- 0.005751 (looe warmer than conch)
+
+kruskal.test(min ~ sitename,d319)
+#1.212e-05 25.503 df=3
+x<-d319$sitename
+y<-d319$min
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+
+####################################
+tempmod19r<-lm(range~sitename,d319)
+summary(tempmod19r)
+#2.e-16
+TukeyHSD(aov(tempmod19r))
+# ALL varied by temp range- conch had the highest range in temp variation<Tenn<Looe<Carysfort
+
+
+kruskal.test(range ~ sitename,d319)
+#2.2e-16 944.82 df=3
+x<-d319$sitename
+y<-d319$range
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+####################################
+AIC(tempmod19m, tempmod19r, tempmod19x)
+########## range is best predictor
+
+#to plot min max and mean on same plot reshape data frame with groupings
+d3_all19 <- data.frame(sitename = d319$sitename, 
+                     date= d319$date,
+                     # Reshape data frame
+                       temp = c(d319$min, d319$max, d319$mean),
+                       group = c(rep("min", nrow(d319)),
+                                 rep("max", nrow(d319)),
+                                 rep("mean", nrow(d319))))
+
+
+
+temp_range2019<-d319
+
+rangeplot<-ggplot(temp_range2019, aes(x=sitename, y=range, fill= sitename))+
+  stat_boxplot(geom= "errorbar", width= 0.5, position = position_dodge(1))+
+  geom_boxplot(position = position_dodge(1),outlier.shape=1)+
+  theme_classic()+
+  scale_colour_manual(values=colors2)+
+  ylab ("Average Temperature Range ( ºC )")+
+  stat_compare_means(label.y=3, method = "kruskal.test")+
+ stat_summary(fun.y="mean", size=0.5, color ="yellow")+
+   theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))
+
+rangeplot
+
+ggexport(rangeplot, filename = "rangeplot.pdf")
+################################################### raw temp
+rangedf<-temp_range2019%>%group_by(date, sitename) %>% summarise(m = mean(range),sd= sd(range))
+
+rangeplot2<-ggplot(rangedf, aes(x = date, y = m, colour = sitename)) +
+  geom_point(aes(fill=sitename), size=1, alpha = 0.25)+
+  geom_smooth(method = "gam", formula = y ~ s(x,bs="cs"), se = FALSE, color = "black",size = .75)+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  facet_wrap(~sitename)+
+  ylab("Daily mean temperature range (°C)")+
+  xlab("")+
+  theme(axis.text = element_text(size = 12))+
+  theme(axis.title = element_text(size = 14))
+  
+rangeplot2
+  
+  ggexport(rangeplot2, filename = "rangeplot22019.pdf")
+  
+  #############################
+
+meanplot<-ggplot(temp_range2019, aes(x=sitename, y=mean, fill= sitename))+
+  stat_boxplot(geom= "errorbar", width= 0.5, position = position_dodge(1))+
+  geom_boxplot(position = position_dodge(1),outlier.shape=1)+
+  theme_classic()+
+  scale_colour_manual(values=colors2)+
+  xlab('Reef')+
+  ylab ("Average Mean Temperature ( ºC )")+
+  stat_summary(fun.y="mean", size=0.5, color ="yellow")+
+  stat_compare_means(label.y=33, method = "kruskal.test")+
+   theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))
+
+meanplot
+ggexport(meanplot, filename = "meanplot.pdf")
+
+
+maxplot<-ggplot(temp_range2019, aes(x=sitename, y=max, fill= sitename))+
+  stat_boxplot(geom= "errorbar", width= 0.5, position = position_dodge(1))+
+  geom_boxplot(position = position_dodge(1),outlier.shape=1)+
+  theme_classic()+
+  scale_colour_manual(values=colors2)+
+  xlab('Reef')+
+  ylab ("Average Maximum Temperature Range ( ºC )")+
+  stat_summary(fun.y="mean", size=0.5, color ="yellow")+
+  stat_compare_means(label.y=33, method = "kruskal.test")+
+   theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))
+maxplot
+ggexport(maxplot, filename = "maxplot.pdf")
+
+
+minplot<-ggplot(temp_range2019, aes(x=sitename, y=min, fill= sitename))+
+  stat_boxplot(geom= "errorbar", width= 0.5, position = position_dodge(1))+
+  geom_boxplot(position = position_dodge(1),outlier.shape=1)+
+  theme_classic()+
+  scale_colour_manual(values=colors2)+
+  xlab('Reef')+
+  ylab ("Average Minimum Temperature ( ºC )")+
+  stat_summary(fun.y="mean", size=0.5, color ="yellow")+
+  stat_compare_means(label.y=33, method = "kruskal.test")+
+   theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))
+minplot
+ggexport(minplot, filename = "minplot.pdf")
+
+
+
+###############################
+
+minmaxplot2019<- ggplot(d3_all19,aes(x = date,y = temp, group= group, colour=group, fill= group)) + 
+  geom_point(alpha=0.25, size=1.5)+
+  #geom_smooth(method = "gam", formula = y ~ s(x,bs="cs"), se = FALSE, color = "black",size = 0.5, alpha= 0.25) +
+  scale_y_continuous(limits = c(20,33), breaks = seq(20,33,2))+ 
+  facet_wrap(~sitename)+
+  ggtitle ("Daily average temperature") +
+  xlab("Date") +  ylab ("Average Temperature ( ºC )")+
+  theme_classic()
+
+minmaxplot2019
+
+ggexport(minmaxplot2019, filename = "minmaxplot2019.pdf")
+################################################
+Allminmaxtempplot19<-ggplot(d3_all19, aes(x = date, y = temp, group=group, colour = group)) +
+  geom_point(aes(fill=sitename), size=1, alpha = 0.25)+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  scale_y_continuous(limits = c(20,33), breaks = seq(20,33,2)) +
+  facet_wrap(~sitename)+
+  ylab("Daily temperature (°C)")+
+  xlab("")+
+   theme(axis.text = element_text(size = 12))+
+  theme(axis.title = element_text(size = 14))
+  #geom_hline(data=all_avrg, aes(yintercept = m, col=sitename))
+  
+Allminmaxtempplot19
+  
+  ggexport(Allminmaxtempplot19, filename = "Allminmaxtempplot19.pdf")
+
+################ Mean, min, max, and range models
+
+########### mean  Check Anova models- to find best descriptive model
+meamod19 <- aov(mean~sitename, data=temp_range2019)
+summary(meamod19)
+#0.00593 F=4.158
+HSDmea19<-TukeyHSD(meamod19)
+HSDmea19  
+#Looe-Cary 0.0034
+group_by(temp_range2019, sitename) %>% summarise(m = mean(mean))
+########### max 
+maxmod19 <- aov(max~sitename, data=temp_range2019)
+summary(maxmod19)
+#0.00189 F=4.972
+HSDmax19<-TukeyHSD(maxmod19)
+HSDmax19
+# Conch-Cary= 0.002
+#Looe-Cary= 0.0141
+# Tenn-Cary= 0.0255
+group_by(temp_range2019, sitename) %>% summarise(m = mean(max))
+#Cary has the lowest maximum temp
+#Conch had the highest max temp
+########### min  
+minmod19 <- aov(min~sitename, data=temp_range2019)
+summary(minmod19)
+#0.00148
+HSDmin19<-TukeyHSD(minmod19)
+HSDmin19 
+#Looe-Conch 0.0005
+group_by(temp_range2019, sitename) %>% summarise(m = mean(min))
+#conch had the lowest min temp
+########### range  
+ranmod19 <- aov(range~sitename, data=temp_range2019)
+summary(ranmod19)
+#2e-16 F= 290.1
+HSDran19<-TukeyHSD(ranmod19)
+HSDran19
+#Conch-Cary
+#Ten-caru
+#looe- Conch
+#Ten-Conch
+#Ten-Looe
+group_by(temp_range2019, sitename) %>% summarise(m = mean(min))
+
+AIC(ranmod19, minmod19, maxmod19, meamod19)
+#ranmod19
+```
+
+Sigificant health times RANGE differences
+```{r}
+jultemp<-subset(temp_range2019, month=="Jul")
+jultempca<-subset(jultemp, sitename=="Carysfort ")
+max(jultempca$tempC)
+#32.27
+jultempco<-subset(jultemp, sitename=="Conch ")
+max(jultempco$tempC)
+#31.25
+jultemplo<-subset(jultemp, sitename=="Looe Key ")
+max(jultemplo$tempC)
+#31.48
+jultempte<-subset(jultemp, sitename=="Tennessee ")
+max(jultempte$tempC)
+#31.56
+
+
+julmodt<-lm(tempC~sitename,jultemp)
+summary(julmodt)
+#2e-16
+#Conch and Cary
+TukeyHSD(aov(julmodt))
+#Conch -Carysfort      -0.168333333 -0.21875418 -0.11791249 0.0000000 ***
+#Looe Key -Carysfort    0.018763441 -0.03165740  0.06918428 0.7741007
+#Tennessee -Carysfort  -0.004758065 -0.05517891  0.04566278 0.9949841
+#Looe Key -Conch        0.187096774  0.13667593  0.23751762 0.0000000 ****
+#Tennessee -Conch       0.163575269  0.11315443  0.21399611 0.0000000 ****
+#Tennessee -Looe Key   -0.023521505 -0.07394235  0.02689934 0.6274240
+group_by(jultemp, sitename) %>% summarise(m = mean(tempC))
+group_by(jultemp, sitename) %>% summarise(m = mean(max))
+
+
+julmodt<-lm(tempC~date,jultemp)
+summary(julmodt)
+
+jultempc <- within(jultemp, sitename <- relevel(sitename, ref = 2)) 
+julmodt<-lm(tempC~sitename,jultempc)
+summary(julmodt)
+TukeyHSD(aov(julmod))
+
+julmod<-aov(range~sitename,jultemp)
+summary(julmod)
+#1.65e-06
+TukeyHSD(julmod)
+#Conch -Carysfort      -0.026451613 -0.07849983  0.02559660 0.5589046
+#Looe Key -Carysfort   -0.101935484 -0.15398370 -0.04988727 0.0000030 *
+#Tennessee -Carysfort  -0.016774194 -0.06882241  0.03527402 0.8410014
+#Looe Key -Conch       -0.075483871 -0.12753208 -0.02343566 0.0011270 *
+#Tennessee -Conch       0.009677419 -0.04237079  0.06172563 0.9639731
+#Tennessee -Looe Key    0.085161290  0.03311308  0.13720950 0.0001571 *
+group_by(jultemp, sitename) %>% summarise(m = mean(range))
+
+julmod<-aov(mean~sitename,jultemp)
+summary(julmod)
+#2e-16
+TukeyHSD(julmod)
+# all different from Conch
+
+julmod<-lm(max~sitename,jultemp)
+summary(julmod)
+#2e-16
+TukeyHSD(julmod)
+#Conch -Carysfort      -0.180967742 -0.23069296 -0.13124253 0.0000000 *
+#Looe Key -Carysfort   -0.034516129 -0.08424134  0.01520908 0.2810716
+#Tennessee -Carysfort  -0.006129032 -0.05585425  0.04359618 0.9889946
+#Looe Key -Conch        0.146451613  0.09672640  0.19617683 0.0000000 *
+#Tennessee -Conch       0.174838710  0.12511350  0.22456392 0.0000000 *
+#Tennessee -Looe Key    0.028387097 -0.02133812  0.07811231 0.4574422
+group_by(jultemp, sitename) %>% summarise(m = mean(max))
+
+
+J<-kruskal.test(range ~ sitename,jultemp)
+J
+Jkrup <- kruskal.test(range ~ sitename,jultemp)
+Jkrup
+#<2.2e-16 Chi2=88.736
+x<-jultemp$sitename
+y<-jultemp$range
+pwcCP <-dunn.test::dunn.test(y,x)
+pwcCP
+
+group_by(jultemp, sitename) %>% summarise(m = mean(max))
+group_by(jultemp, sitename) %>% summarise(m = mean(mean))
+
+
+
+conchjul<-subset(jultemp,sitename =="Conch ")
+view(conchjul)
+caryjul<-subset(jultemp,sitename =="Carysfort ")
+view(caryjul)
+loojul<-subset(jultemp,sitename =="Looe Key ")
+view(loojul)
+tenjul<-subset(jultemp,sitename =="Tennessee ")
+view(tenjul)
+####################################
+augtemp<-subset(temp_range2019, month=="Aug")
+View(augtemp)
+augmod<-lm(range~sitename,augtemp)
+summary(augmod)
+#2e-16
+TukeyHSD(aov(augmod))
+#Conch -Carysfort       0.1619354839  0.11668934  0.20718163 0.0000000 *
+#Looe Key -Carysfort   -0.0074193548 -0.05266550  0.03782679 0.9748198
+#Tennessee -Carysfort  -0.0006451613 -0.04589131  0.04460098 0.9999823
+#Looe Key -Conch       -0.1693548387 -0.21460098 -0.12410869 0.0000000 *
+#Tennessee -Conch      -0.1625806452 -0.20782679 -0.11733450 0.0000000 *
+#Tennessee -Looe Key    0.0067741935 -0.03847195  0.05202034 0.9806230
+group_by(augtemp, sitename) %>% summarise(m = mean(min))
+group_by(augtemp, sitename) %>% summarise(m = mean(mean))
+#1 "Carysfort "  30.6
+#2 "Conch "      30.5
+#3 "Looe Key "   30.6
+#4 "Tennessee "  30.6
+group_by(augtemp, sitename) %>% summarise(m = mean(range))
+group_by(augtemp, sitename) %>% summarise(m = mean(max))
+group_by(augtemp, sitename) %>% summarise(m = mean(tempC))
+
+augmod<-lm(max~sitename,augtemp)
+summary(augmod)
+#mean= 0.0834
+#max
+#0.16
+TukeyHSD(aov(augmod))
+#max
+#Conch -Carysfort       0.04516129 -0.01415953  0.1044821132 0.2047606
+#Looe Key -Carysfort   -0.05903226 -0.11835308  0.0002885648 0.0516799
+#Tennessee -Carysfort  -0.02677419 -0.08609502  0.0325466294 0.6520765
+#Looe Key -Conch       -0.10419355 -0.16351437 -0.0448727255 0.0000389*
+#Tennessee -Conch      -0.07193548 -0.13125631 -0.0126146610 0.0099609*
+#Tennessee -Looe Key    0.03225806 -0.02706276  0.0915788874 0.5007825
+
+A<-kruskal.test(range ~ sitename,augtemp)
+A
+Akrup <- kruskal.test(range ~ sitename,augtemp)
+Akrup
+#<2.2e-16 Chi2=88.736
+x<-augtemp$sitename
+y<-augtemp$range
+pwcCP <-dunn.test::dunn.test(y,x)
+pwcCP
+
+conaug<-subset(augtemp,sitename =="Conch ")
+caraug<-subset(augtemp,sitename =="Carysfort ")
+looaug<-subset(augtemp,sitename =="Looe Key ")
+tenaug<-subset(augtemp,sitename =="Tennessee ")
+view(conaug)
+view(caraug)
+view(looaug)
+view(tenaug)
+
+###########################
+
+dectemp<-subset(temp_range2019, month=="Dec")
+
+decmod<-aov(tempC~sitename,dectemp)
+summary(decmod)
+#0.000447
+TukeyHSD(decmod)
+
+#Conch -Carysfort      -0.069368280 -0.15164256  0.01290600 0.1326710
+#Looe Key -Carysfort   -0.004072581 -0.08634686  0.07820169 0.9992644
+#Tennessee -Carysfort  -0.115389785 -0.19766406 -0.03311551 0.0018014*
+#Looe Key -Conch        0.065295699 -0.01697858  0.14756997 0.1735820
+#Tennessee -Conch      -0.046021505 -0.12829578  0.03625277 0.4757299
+#Tennessee -Looe Key   -0.111317204 -0.19359148 -0.02904293 0.0028815*
+
+group_by(dectemp, sitename) %>% summarise(m = mean(tempC))
+#1 "Carysfort "  25.5
+#2 "Conch "      25.4
+#3 "Looe Key "   25.5
+#4 "Tennessee "  25.3
+
+decmod<-aov(range~sitename,dectemp)
+summary(decmod)
+#2e-16
+TukeyHSD(decmod)
+#Conch -Carysfort       0.05967742  0.003626401  0.11572844 0.0316861 *
+#Looe Key -Carysfort   -0.17290323 -0.228954244 -0.11685221 0.0000000 *
+#Tennessee -Carysfort   0.08290323  0.026852207  0.13895424 0.0008431 *
+#Looe Key -Conch       -0.23258065 -0.288631664 -0.17652963 0.0000000 *
+#Tennessee -Conch       0.02322581 -0.032825212  0.07927683 0.7108315
+#Tennessee -Looe Key    0.25580645  0.199755433  0.31185747 0.0000000 *
+
+group_by(dectemp, sitename) %>% summarise(m = mean(range))
+#1 "Carysfort " 0.662
+#2 "Conch "     0.721
+#3 "Looe Key "  0.489
+#4 "Tennessee " 0.745
+
+D<-kruskal.test(range ~ sitename,dectemp)
+D
+Dkrup <- kruskal.test(range ~ sitename,dectemp)
+Dkrup
+#<2.2e-16 Chi2=88.736
+x<-dectemp$sitename
+y<-dectemp$range
+pwcCP <-dunn.test::dunn.test(y,x)
+pwcCP
+
+decmod<-aov(mean~sitename,dectemp)
+summary(decmod)
+#0.000106
+TukeyHSD(decmod)
+#Conch -Carysfort      -0.069368280 -0.14548677  0.00675021 0.0888224
+#Looe Key -Carysfort   -0.004072581 -0.08019107  0.07204591 0.9990721
+#Tennessee -Carysfort  -0.115389785 -0.19150827 -0.03927129 0.0005769 *
+#Looe Key -Conch        0.065295699 -0.01082279  0.14141419 0.1220577
+#Tennessee -Conch      -0.046021505 -0.12214000  0.03009698 0.4052956
+#Tennessee -Looe Key   -0.111317204 -0.18743569 -0.03519871 0.0009978 *
+group_by(dectemp, sitename) %>% summarise(m = mean(mean))
+
+decmod<-aov(max~sitename,dectemp)
+summary(decmod)
+#0.00211
+TukeyHSD(decmod)
+         
+#Conch -Carysfort      -0.02064516 -0.09236047  0.051070146 0.8809336
+#Looe Key -Carysfort   -0.06000000 -0.13171531  0.011715307 0.1375811
+#Tennessee -Carysfort  -0.09870968 -0.17042498 -0.026994370 0.0023123 *
+#Looe Key -Conch       -0.03935484 -0.11107015  0.032360469 0.4927469
+#Tennessee -Conch      -0.07806452 -0.14977982 -0.006349209 0.0265784 *
+#Tennessee -Looe Key   -0.03870968 -0.11042498  0.033005630 0.5072987
+group_by(dectemp, sitename) %>% summarise(m = mean(max))
+
+decmod<-aov(min~sitename,dectemp)
+summary(decmod)
+#6.26e-16
+TukeyHSD(decmod)
+#Conch -Carysfort      -0.08032258 -0.17108186  0.01043669 0.1041361
+#Looe Key -Carysfort    0.11290323  0.02214395  0.20366250 0.0076418 *
+#Tennessee -Carysfort  -0.18161290 -0.27237218 -0.09085363 0.0000017 *
+#Looe Key -Conch        0.19322581  0.10246653  0.28398508 0.0000003 *
+#Tennessee -Conch      -0.10129032 -0.19204960 -0.01053105 0.0215888 *
+#Tennessee -Looe Key   -0.29451613 -0.38527540 -0.20375685 0.0000000 *
+
+
+
+novtemp<-subset(temp_range2019, month=="Nov")
+
+N<-kruskal.test(range ~ sitename,novtemp)
+N
+Nkrup <- kruskal.test(range ~ sitename,novtemp)
+Nkrup
+#<2.2e-16 Chi2=88.736
+x<-novtemp$sitename
+y<-novtemp$range
+pwcCP <-dunn.test::dunn.test(y,x)
+pwcCP
+
+N<-kruskal.test(mean ~ sitename,novtemp)
+N
+group_by(novtemp, sitename) %>% summarise(m = mean(min))
+group_by(novtemp, sitename) %>% summarise(m = mean(mean))
+group_by(novtemp, sitename) %>% summarise(m = mean(max))
+group_by(novtemp, sitename) %>% summarise(m = mean(range))
+group_by(novtemp, sitename) %>% summarise(m = mean(tempC))
+
+
+```
+
+Censoring months temperature compairisons
+
+```{r}
+################################ February
+Feb_temp<-temp_data_bysite%>%
+  filter(month=="Feb", year==2019)
+
+Feb<-Feb_temp%>%group_by(date,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+Feb
+
+Febmean<-Feb_temp%>%group_by(month,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+#1 Feb   "Carysfort "  25.0 0.881
+#2 Feb   "Conch "      25.1 0.880
+#3 Feb   "Looe Key "   25.1 0.904
+#4 Feb   "Tennessee "  25.2 0.894
+
+colors2 <-  thematic::okabe_ito(4)
+
+
+Febtempplot<-ggplot(Feb, aes(x = date, y = m, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.25)+
+  geom_point(aes(fill=sitename))+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Mean daily temperature (°C)")+
+  xlab("")+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14)) +
+  #guides(color=guide_legend(title="Reef"))+
+  geom_hline(data=Febmean, aes(yintercept = m, col=sitename))
+  Febtempplot
+
+ggexport(Febtempplot, filename = "Febtempplot.pdf")
+
+#Febmonmond <- aov(tempC~ sitename, data=Feb_temp)
+#summary(Febmonmond)
+#HSDmonFeb<-TukeyHSD(Febmonmond)
+#HSDmonFeb
+
+kruskal.test(tempC ~ sitename,Feb_temp)
+#1.99e-5
+x<-Feb_temp$sitename
+y<-Feb_temp$tempC
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+#Conch- Cary
+#Cary-Tenn
+############################## range
+Feb_range<-temp_data_fullrange%>%
+  filter(month=="Feb", year==2019)
+Febr<-Feb_range%>%group_by(date,sitename) %>% summarise(m = mean(range))
+
+Febr
+Febmeanr<-Feb_range%>%group_by(month,sitename) %>% summarise(m = mean(range), sd = sd(range, na.rm=TRUE))
+Febmeanr
+#1 Feb   "Carysfort " 0.505 0.213
+#2 Feb   "Conch "     0.696 0.397
+#3 Feb   "Looe Key "  0.792 0.489
+#4 Feb   "Tennessee " 0.759 0.531
+
+kruskal.test(range ~ sitename,Feb_range)
+#0.08274 6.6824 df=3
+x<-Feb_range$sitename
+y<-Feb_range$range
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+
+#same Feb temps 
+
+################################ March
+Mar_temp<-temp_data_bysite%>%
+  filter(month=="Mar", year==2019)
+
+Mar_temp %>% group_by(sitename) %>% shapiro_test(tempC)
+
+
+Mar<-Mar_temp%>%group_by(date,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+Mar
+
+Marmean<-Mar_temp%>%group_by(month,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+Marmean
+#1 Mar   "Carysfort "  25.6 0.458
+#2 Mar   "Conch "      25.7 0.448
+#3 Mar   "Looe Key "   25.5 0.598
+#4 Mar   "Tennessee "  25.6 0.479
+
+
+Martempplot<-ggplot(Mar, aes(x = date, y = m, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.25)+
+  geom_point(aes(fill=sitename))+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Mean daily temperature (°C)")+
+  xlab("")+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14)) +
+  #guides(color=guide_legend(title="Reef"))+
+  geom_hline(data=Marmean, aes(yintercept = m, col=sitename))
+  Martempplot
+
+ggexport(Martempplot, filename = "Martempplot.pdf")
+
+kruskal.test(tempC ~ sitename,Mar_temp)
+#2.2e-16
+x<-Mar_temp$sitename
+y<-Mar_temp$tempC
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+# all diff except Tenn & cary
+
+############################## range
+Mar_range<-temp_data_fullrange%>%
+  filter(month=="Mar", year==2019)
+Marr<-Mar_range%>%group_by(date,sitename) %>% summarise(m = mean(range))
+
+Marr
+Marmeanr<-Mar_range%>%group_by(month,sitename) %>% summarise(m = mean(range), sd = sd(range, na.rm=TRUE))
+Marmeanr
+#1 Mar   "Carysfort " 0.621 0.251
+#2 Mar   "Conch "     0.716 0.237
+#3 Mar   "Looe Key "  0.739 0.364
+#4 Mar   "Tennessee " 0.559 0.274
+######################################################## mar min max range mean
+marmin <- Mar_temp %>% group_by(date,sitename) %>% 
+  dplyr::summarise(min = min(tempC), max = max(tempC),mean =mean(tempC))%>%
+  mutate(range = max-min)
+
+marmin
+kruskal.test(min ~ sitename,marmin)
+#0.3801
+kruskal.test(max ~ sitename,marmin)
+#0.165
+kruskal.test(mean ~ sitename,marmin)
+#0.2756- 
+kruskal.test(range ~ sitename,marmin)
+#0.02482- range
+x<-marmin$sitename
+y<-marmin$range
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+pwcCP
+#Tenn- Conch
+
+marrang<-marmin%>%group_by(sitename) %>% dplyr::summarise(m = mean(range), sd = sd(range, na.rm=TRUE))
+marrang
+#1 "Carysfort " 0.465 0.169 
+#2 "Conch "     0.521 0.177 
+#3 "Looe Key "  0.367 0.0939
+#4 "Tennessee " 0.354 0.122 
+
+#########################################################
+
+Marmonmondr <- aov(range~ sitename, data=Mar_range)
+summary(Marmonmondr)
+HSDmonMarr<-TukeyHSD(Marmonmondr)
+HSDmonMarr
+################################ April
+Apr_temp<-temp_data_bysite%>%
+  filter(month=="Apr", year==2019)
+
+Apr<-Apr_temp%>%group_by(date,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+Apr
+
+Aprmean<-Apr_temp%>%group_by(month,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+Aprmean
+#1 Apr   "Carysfort "  26.1 0.417
+#2 Apr   "Conch "      26.2 0.435
+#3 Apr   "Looe Key "   26.4 0.470
+#4 Apr   "Tennessee "  26.3 0.437
+
+Aprtempplot<-ggplot(Apr, aes(x = date, y = m, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.25)+
+  geom_point(aes(fill=sitename))+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Mean daily temperature (°C)")+
+  xlab("")+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14)) +
+  #guides(color=guide_legend(title="Reef"))+
+  geom_hline(data=Aprmean, aes(yintercept = m, col=sitename))
+  Aprtempplot
+
+ggexport(Aprtempplot, filename = "Aprtempplot.pdf")
+
+kruskal.test(tempC ~ sitename,Apr_temp)
+#2.2e-16
+x<-Apr_temp$sitename
+y<-Apr_temp$tempC
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+# all diff except temps diff
+
+############################## range
+Apr_range<-temp_data_fullrange%>%
+  filter(month=="Apr", year==2019)
+
+Aprr<-Apr_range%>%group_by(date,sitename) %>% summarise(m = mean(range))
+
+Aprr
+aprmeanr<-Apr_range%>%group_by(month,sitename) %>% summarise(m = mean(range), sd = sd(range, na.rm=TRUE))
+aprmeanr
+#1 Mar   "Carysfort " 0.621 0.251
+#2 Mar   "Conch "     0.716 0.237
+#3 Mar   "Looe Key "  0.739 0.364
+#4 Mar   "Tennessee " 0.559 0.274
+######################################################## apr min max range mean
+aprmin <- Apr_temp %>% group_by(date,sitename) %>% 
+  dplyr::summarise(min = min(tempC), max = max(tempC),mean =mean(tempC))%>%
+  mutate(range = max-min)
+
+aprmin
+kruskal.test(min ~ sitename,aprmin)
+#0007269 12.034 df=3
+x<-aprmin$sitename
+y<-aprmin$min
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+#Carys-Looe
+
+kruskal.test(max ~ sitename,aprmin)
+#0.003711 13.477 
+x<-aprmin$sitename
+y<-aprmin$max
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+#Carys-Looe
+
+aprrang<-aprmin%>%group_by(sitename) %>% dplyr::summarise(m = mean(max), sd = sd(max, na.rm=TRUE))
+aprrang
+#1 "Carysfort "  26.4 0.371
+#2 "Conch "      26.6 0.369
+#3 "Looe Key "   26.8 0.424
+#4 "Tennessee "  26.6 0.417
+
+kruskal.test(mean ~ sitename,aprmin)
+#0.004385 13.12 
+y<-aprmin$mean
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+
+kruskal.test(range ~ sitename,aprmin)
+#0.05745 range
+
+#########################################################
+
+Aprmonmond <- aov(tempC~ sitename, data=Apr_temp)
+summary(Aprmonmond)
+HSDmonApr<-TukeyHSD(Aprmonmond)
+HSDmonApr
+
+################################### May
+May_temp<-temp_data_bysite%>%
+  filter(month=="May", year==2019)
+
+May<-May_temp%>%group_by(date,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+May
+
+Maymean<-May_temp%>%group_by(month,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+Maymean
+#27.5 Cary
+#27.6 Conch
+#28.3 Looe
+#27.7 Tenn
+
+Maytempplot<-ggplot(May, aes(x = date, y = m, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.25)+
+  geom_point(aes(fill=sitename))+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Mean daily temperature (°C)")+
+  xlab("")+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14)) +
+  geom_hline(data=Maymean, aes(yintercept = m, col=sitename))
+  Maytempplot
+
+ggexport(Maytempplot, filename = "Maytempplot.pdf")
+
+kruskal.test(tempC ~ sitename,May_temp)
+#2.2e-16
+x<-May_temp$sitename
+y<-May_temp$tempC
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+# all diff 
+############################## range
+May_range<-temp_data_fullrange%>%
+  filter(month=="May", year==2019)
+
+mayr<-May_range%>%group_by(date,sitename) %>% dplyr::summarise(m = mean(range))
+
+mayr
+maymeanr<-May_range%>%group_by(month,sitename) %>% summarise(m = mean(range), sd = sd(range, na.rm=TRUE))
+maymeanr
+#1 May   "Carysfort " 0.644 0.181
+#2 May   "Conch "     1.26  0.700
+#3 May   "Looe Key "  0.825 0.391
+#4 May   "Tennessee " 0.963 0.517
+######################################################## may min max range mean
+maymin <- May_temp %>% group_by(date,sitename) %>% 
+  dplyr::summarise(min = min(tempC), max = max(tempC),mean =mean(tempC))%>%
+  mutate(range = max-min)
+
+maymin
+kruskal.test(min ~ sitename,maymin)
+#1.097e-5 25.71 df=3
+x<-maymin$sitename
+y<-maymin$min
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+#Carys-Looe
+#Conch-Looe
+#Looe-Tenn
+maymin%>%group_by(sitename) %>% summarise(m = mean(min), sd = sd(min, na.rm=TRUE))
+# Conch coldest
+
+kruskal.test(max ~ sitename,maymin)
+#5.156e-5 22.491 
+x<-maymin$sitename
+y<-maymin$max
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+#Carys-Looe
+
+maymin%>%group_by(sitename) %>% summarise(m = mean(max), sd = sd(max, na.rm=TRUE))
+
+#1 "Carysfort "  27.8 0.544
+#2 "Conch "      28.3 0.716
+#3 "Looe Key "   28.7 0.791
+#4 "Tennessee "  28.3 0.699
+#carys hottest
+
+kruskal.test(mean ~ sitename,maymin)
+#2.416e-50.004385 13.12 
+y<-maymin$mean
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+
+kruskal.test(range ~ sitename,maymin)
+#0.0001552  20.187 range
+y<-maymin$range
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+# cary- Conch
+#Cary-Ten
+#########################################################
+Maymonmond <- aov(tempC~ sitename, data=May_temp)
+summary(Maymonmond)
+HSDmonMay<-TukeyHSD(Maymonmond)
+HSDmonMay
+
+###################################  June
+Jun_temp<-temp_data_bysite%>%
+  filter(month=="Jun", year==2019)
+
+Jun<-Jun_temp%>%group_by(date,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+Jun
+Junmean<-Jun_temp%>%group_by(sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+Junmean
+#1 Jun   "Carysfort "  29.2 0.772
+#2 Jun   "Conch "      29.4 0.734
+#3 Jun   "Looe Key "   29.5 0.644
+#4 Jun   "Tennessee "  29.4 0.648
+
+Juntempplot<-ggplot(Jun, aes(x = date, y = m, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.25)+
+  geom_point(aes(fill=sitename))+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Mean daily temperature (°C)")+
+  xlab("")+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14)) +
+  geom_hline(data=Junmean, aes(yintercept = m, col=sitename))
+
+  Juntempplot
+
+ggexport(Juntempplot, filename = "Juntempplot.pdf")
+
+
+kruskal.test(tempC ~ sitename,Jun_temp)
+#4.944e-13
+x<-Jun_temp$sitename
+y<-Jun_temp$tempC
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+#Cay-Conch
+#Cary-Looe
+#Cary-Tenn
+#all diff 
+############################## range
+Jun_range<-temp_data_fullrange%>%
+  filter(month=="Jun", year==2019)
+
+junr<-Jun_range%>%group_by(date,sitename) %>% dplyr::summarise(m = mean(range))
+
+junr
+junmeanr<-Jun_range%>%group_by(month,sitename) %>% summarise(m = mean(range), sd = sd(range, na.rm=TRUE))
+junmeanr
+#1 Jun   "Carysfort " 0.862 0.296
+#2 Jun   "Conch "     1.19  0.609
+#3 Jun   "Looe Key "  0.808 0.316
+#4 Jun   "Tennessee " 1.11  0.766
+######################################################## jun min max range mean
+junmin <- Jun_temp %>% group_by(date,sitename) %>% 
+  dplyr::summarise(min = min(tempC), max = max(tempC),mean =mean(tempC))%>%
+  mutate(range = max-min)
+
+junmin
+kruskal.test(min ~ sitename,junmin)
+#0.3531
+
+kruskal.test(max ~ sitename,junmin)
+#0.505 
+
+kruskal.test(mean ~ sitename,junmin)
+#0.4252
+
+kruskal.test(range ~ sitename,junmin)
+#0.05847
+#########################################################
+Junmonmond <- aov(tempC~ sitename, data=Jun_temp)
+summary(Junmonmond)
+HSDmonJun<-TukeyHSD(Junmonmond)
+HSDmonJun
+###################################  July
+Jul_temp<-temp_data_bysite%>%
+  filter(month=="Jul", year==2019)
+
+Jul<-Jul_temp%>%group_by(date,sitename) %>% dplyr::summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+Jul
+Julmean<-Jul_temp%>%group_by(month,sitename) %>% dplyr::summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+#1 Jul   "Carysfort "  30.4 0.429
+#2 Jul   "Conch "      30.3 0.335
+#3 Jul   "Looe Key "   30.4 0.369
+#4 Jul   "Tennessee "  30.4 0.374
+
+
+res.kruskal2 <- Jul_temp %>% kruskal_test(tempC ~ sitename)
+res.kruskal2
+#4.21e-21 98
+pwcCP <- Jul_temp %>% 
+  dunn_test(tempC ~ sitename, p.adjust.method = "bonferroni") 
+pwcCP
+#all different than conch
+
+
+Jultempplot<-ggplot(Jul, aes(x = date, y = m, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.25)+
+  geom_point(aes(fill=sitename))+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Mean daily temperature (°C)")+
+  xlab("")+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14)) +
+  geom_hline(data=Julmean, aes(yintercept = m, col=sitename))
+
+  Jultempplot
+
+ggexport(Jultempplot, filename = "Jultempplot.pdf")
+
+############################## range
+Jul_range<-temp_data_fullrange%>%
+  filter(month=="Jul", year==2019)
+
+Julr<-Jul_range%>%group_by(date,sitename) %>% dplyr::summarise(m = mean(range))
+
+Julr
+Julmeanr<-Jul_range%>%group_by(month,sitename) %>% dplyr::summarise(m = mean(range), sd = sd(range, na.rm=TRUE))
+Julmeanr
+#1 Jul   "Carysfort " 0.826 0.405
+#2 Jul   "Conch "     0.799 0.244
+#3 Jul   "Looe Key "  0.724 0.331
+#4 Jul   "Tennessee " 0.809 0.545
+######################################################## jul min max range mean
+julmin <- Jul_temp %>% group_by(date,sitename) %>% 
+  dplyr::summarise(min = min(tempC), max = max(tempC),mean =mean(tempC))%>%
+  mutate(range = max-min)
+
+julmin
+
+kruskal.test(min ~ sitename,julmin)
+#0.02001
+x<-julmin$sitename
+y<-julmin$min
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+#Conch-Looe
+#Conch-Tenn
+
+julmin%>%group_by(sitename) %>% summarise(m = mean(min), sd = sd(min, na.rm=TRUE))
+
+#1 "Carysfort "  30.0 0.208
+#2 "Conch "      29.9 0.290
+#3 "Looe Key "   30.1 0.345
+#4 "Tennessee "  30.0 0.397
+
+
+kruskal.test(max ~ sitename,julmin)
+#0.3337 
+
+kruskal.test(mean ~ sitename,julmin)
+#0.0814
+
+kruskal.test(range ~ sitename,julmin)
+#0.2995
+#########################################################
+
+Julmonmond <- aov(tempC~ sitename, data=Jul_temp)
+summary(Julmonmond)
+HSDmonJul<-TukeyHSD(Julmonmond)
+HSDmonJul
+################################### Aug
+Aug_temp<-temp_data_bysite%>%
+  filter(month=="Aug", year==2019)
+
+Aug_temp %>% group_by(sitename) %>% shapiro_test(tempC)
+
+Aug<-Aug_temp%>%group_by(date,sitename) %>% dplyr::summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+Aug
+Augmean<-Aug_temp%>%group_by(month,sitename) %>% dplyr::summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+Augmean
+#1 Aug   "Carysfort "  30.6 0.479
+#2 Aug   "Conch "      30.5 0.615
+#3 Aug   "Looe Key "   30.6 0.378
+#4 Aug   "Tennessee "  30.6 0.499
+
+res.kruskal2 <- Aug_temp %>% kruskal_test(tempC ~ sitename)
+res.kruskal2
+#0.0051 stat= 12.8
+pwcCP <- Aug_temp %>% 
+  dunn_test(tempC ~ sitename, p.adjust.method = "bonferroni") 
+pwcCP
+#Carys- Tenn
+# Looe and Tenn 
+
+Augtempplot<-ggplot(Aug, aes(x = date, y = m, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.25)+
+  geom_point(aes(fill=sitename))+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Mean daily temperature (°C)")+
+  xlab("")+
+   theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14)) +
+  geom_hline(data=Augmean, aes(yintercept = m, col=sitename))
+
+  Augtempplot
+
+ggexport(Augtempplot, filename = "Augtempplot.pdf")
+
+############################## range
+aug_range<-temp_data_fullrange%>%
+  filter(month=="Aug", year==2019)
+
+augr<-aug_range%>%group_by(date,sitename) %>% dplyr::summarise(m = mean(range))
+
+augr
+augmeanr<-aug_range%>%group_by(month,sitename) %>% dplyr::summarise(m = mean(range), sd = sd(range, na.rm=TRUE))
+augmeanr
+#1 Aug   "Carysfort " 0.726 0.227
+#2 Aug   "Conch "     0.888 0.342
+#3 Aug   "Looe Key "  0.719 0.327
+#4 Aug   "Tennessee " 0.725 0.448
+######################################################## aug min max range mean
+augmin <- Aug_temp %>% group_by(date,sitename) %>% 
+  dplyr::summarise(min = min(tempC), max = max(tempC),mean =mean(tempC))%>%
+  mutate(range = max-min)
+
+augmin
+
+kruskal.test(min ~ sitename,augmin)
+#0.8105
+
+kruskal.test(max ~ sitename,augmin)
+#0.8418 
+
+kruskal.test(mean ~ sitename,augmin)
+#0.9195
+
+kruskal.test(range ~ sitename,augmin)
+#0.02597
+x<-augmin$sitename
+y<-augmin$range
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+#NA
+
+#########################################################
+Augmonmondr <- aov(range~ sitename, data=Aug_range)
+summary(Augmonmondr)
+HSDmonAugr<-TukeyHSD(Augmonmondr)
+HSDmonAugr
+
+########################## Sep
+Sep_temp<-temp_data_bysite%>%
+  filter(month=="Sep", year==2019)
+
+Sep<-Sep_temp%>%group_by(date,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+Sep
+Sepmean<-Sep_temp%>%group_by(month,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+Sepmean
+#1 Sep   "Carysfort "  29.5 0.568
+#2 Sep   "Conch "      29.6 0.606
+#3 Sep   "Looe Key "   29.6 0.675
+#4 Sep   "Tennessee "  29.7 0.539
+
+#########################################################
+res.kruskal2 <- Sep_temp %>% kruskal_test(tempC ~ sitename)
+res.kruskal2
+#8.58e-11 stat= 49.9
+pwcCP <- Sep_temp %>% 
+  dunn_test(tempC ~ sitename, p.adjust.method = "bonferroni") 
+pwcCP
+#Carys- Tenn
+#conch-Tenn
+# Looe and Tenn 
+
+Septempplot<-ggplot(Sep, aes(x = date, y = m, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.25)+
+  geom_point(aes(fill=sitename))+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Mean daily temperature (°C)")+
+  xlab("")+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14)) +
+  geom_hline(data=Sepmean, aes(yintercept = m, col=sitename))
+
+  Septempplot
+
+ggexport(Septempplot, filename = "Septempplot.pdf")
+############################## range
+sep_range<-temp_data_fullrange%>%
+  filter(month=="Sep", year==2019)
+
+sepr<-sep_range%>%group_by(date,sitename) %>% dplyr::summarise(m = mean(range))
+
+sepr
+sepmeanr<-sep_range%>%group_by(month,sitename) %>% dplyr::summarise(m = mean(range), sd = sd(range, na.rm=TRUE))
+sepmeanr
+#1 Sep   "Carysfort " 0.551 0.242
+#2 Sep   "Conch "     0.689 0.326
+#3 Sep   "Looe Key "  0.538 0.167
+#4 Sep   "Tennessee " 0.508 0.196
+
+######################################################## sep min max range mean
+sepmin <- Sep_temp %>% group_by(date,sitename) %>% 
+  dplyr::summarise(min = min(tempC), max = max(tempC),mean =mean(tempC))%>%
+  mutate(range = max-min)
+
+sepmin
+
+kruskal.test(min ~ sitename,sepmin)
+#0.3228
+
+kruskal.test(max ~ sitename,sepmin)
+#0.5569 
+
+kruskal.test(mean ~ sitename,sepmin)
+#0.4291
+
+kruskal.test(range ~ sitename,sepmin)
+#0.1569
+x<-sepmin$sitename
+
+#########################################################
+
+Sepmonmond <- aov(tempC~ sitename, data=Sep_temp)
+summary(Sepmonmond)
+HSDmonSep<-TukeyHSD(Sepmonmond)
+HSDmonSep
+
+########################## Oct
+Oct_temp<-temp_data_bysite%>%
+  filter(month=="Oct", year==2019)
+
+Oct<-Oct_temp%>%group_by(date,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+Oct
+Octmean<-Oct_temp%>%group_by(month,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+Octmean
+#1 Oct   "Carysfort "  28.8 0.307
+#2 Oct   "Conch "      28.9 0.293
+#3 Oct   "Looe Key "   29.0 0.277
+#4 Oct   "Tennessee "  29.0 0.243
+
+
+#########################################################
+
+res.kruskal2 <- Oct_temp %>% kruskal_test(tempC ~ sitename)
+res.kruskal2
+#2.31e-16 stat= 75.9
+pwcCP <- Oct_temp %>% 
+  dunn_test(tempC ~ sitename, p.adjust.method = "bonferroni") 
+pwcCP
+#Carys- Tenn
+#conch-Tenn
+# Looe and Tenn 
+
+Octtempplot<-ggplot(Oct, aes(x = date, y = m, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.25)+
+  geom_point(aes(fill=sitename))+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Mean daily temperature (°C)")+
+  xlab("")+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14)) +
+  geom_hline(data=Octmean, aes(yintercept = m, col=sitename))
+
+  Octtempplot
+
+ggexport(Octtempplot, filename = "Octtempplot.pdf")
+
+############################## range
+oct_range<-temp_data_fullrange%>%
+  filter(month=="Oct", year==2019)
+
+octr<-oct_range%>%group_by(date,sitename) %>% dplyr::summarise(m = mean(range))
+
+octr
+octmeanr<-oct_range%>%group_by(month,sitename) %>% dplyr::summarise(m = mean(range), sd = sd(range, na.rm=TRUE))
+octmeanr
+#1 Oct   "Carysfort " 0.465 0.169 
+#2 Oct   "Conch "     0.521 0.177 
+#3 Oct   "Looe Key "  0.367 0.0939
+#4 Oct   "Tennessee " 0.354 0.122
+######################################################## oct min max range mean
+octmin <- Oct_temp %>% group_by(date,sitename) %>% 
+  dplyr::summarise(min = min(tempC), max = max(tempC),mean =mean(tempC))%>%
+  mutate(range = max-min)
+
+octmin
+
+kruskal.test(min ~ sitename,octmin)
+#0.0745 6.9198
+
+kruskal.test(max ~ sitename,octmin)
+#0.769 
+
+kruskal.test(mean ~ sitename,octmin)
+#0.2742
+
+kruskal.test(range ~ sitename,octmin)
+#3.042e-5 23.59
+x<-octmin$sitename
+y<-octmin$range
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+#NA
+
+#########################################################
+Octmonmond <- aov(tempC~ sitename, data=Oct_temp)
+summary(Octmonmond)
+HSDmonOct<-TukeyHSD(Octmonmond)
+HSDmonOct
+
+
+########################## Nov
+Nov_temp<-temp_data_bysite%>%
+  filter(month=="Nov", year==2019)
+
+Nov<-Nov_temp%>%group_by(date,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+Nov
+Novmean<-Nov_temp%>%group_by(month,sitename) %>% dplyr::summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+Novmean
+#1 Nov   "Carysfort "  27.6 0.819
+#2 Nov   "Conch "      27.6 0.834
+#3 Nov   "Looe Key "   27.6 0.814
+#4 Nov   "Tennessee "  27.6 0.939
+
+#########################################################
+res.kruskal2 <- Nov_temp %>% kruskal_test(tempC ~ sitename)
+res.kruskal2
+#0.232
+pwcCP <- Nov_temp %>% 
+  dunn_test(tempC ~ sitename, p.adjust.method = "bonferroni") 
+pwcCP
+ 
+#########################################################
+
+Novtempplot<-ggplot(Nov, aes(x = date, y = m, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.25)+
+  geom_point(aes(fill=sitename))+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Mean daily temperature (°C)")+
+  xlab("")+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14)) +
+  geom_hline(data=Novmean, aes(yintercept = m, col=sitename))
+
+  Novtempplot
+
+ggexport(Novtempplot, filename = "Novtempplot.pdf")
+
+############################## range
+nov_range<-temp_data_fullrange%>%
+  filter(month=="Nov", year==2019)
+
+novr<-nov_range%>%group_by(date,sitename) %>% dplyr::summarise(m = mean(range))
+
+novr
+novmeanr<-nov_range%>%group_by(month,sitename) %>% dplyr::summarise(m = mean(range), sd = sd(range, na.rm=TRUE))
+novmeanr
+#1 Nov   "Carysfort " 0.600 0.275
+#2 Nov   "Conch "     0.798 0.544
+#3 Nov   "Looe Key "  0.691 0.363
+#4 Nov   "Tennessee " 0.752 0.571
+######################################################## jun min max range mean
+novmin <- Nov_temp %>% group_by(date,sitename) %>% 
+  dplyr::summarise(min = min(tempC), max = max(tempC),mean =mean(tempC))%>%
+  mutate(range = max-min)
+
+novmin
+
+kruskal.test(min ~ sitename,novmin)
+#0.9843
+
+kruskal.test(max ~ sitename,novmin)
+#0.9459
+
+kruskal.test(mean ~ sitename,novmin)
+#0.9743
+
+kruskal.test(range ~ sitename,novmin)
+#0.5172
+x<-novmin$sitename
+y<-novmin$range
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+#NA
+
+#########################################################
+
+Novmonmond <- aov(tempC~ sitename, data=Nov_temp)
+summary(Novmonmond)
+HSDmonNov<-TukeyHSD(Novmonmond)
+HSDmonNov
+########################## Dec
+Dec_temp<-temp_data_bysite%>%
+  filter(month=="Dec", year==2019)
+
+Dec<-Dec_temp%>%group_by(date,sitename) %>% dplyr::summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+Dec
+Decmean<-Dec_temp%>%group_by(month,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+Decmean
+#1 Dec   "Carysfort "  25.5 0.527
+#2 Dec   "Conch "      25.4 0.612
+#3 Dec   "Looe Key "   25.5 0.624
+#4 Dec   "Tennessee "  25.3 0.695
+
+#########################################################
+res.kruskal2 <- Dec_temp %>% kruskal_test(tempC ~ sitename)
+res.kruskal2
+#0.0.119
+pwcCP <- Dec_temp %>% 
+  dunn_test(tempC ~ sitename, p.adjust.method = "bonferroni") 
+pwcCP
+ 
+
+Dectempplot<-ggplot(Dec, aes(x = date, y = m, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.25)+
+  geom_point(aes(fill=sitename))+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Mean daily temperature (°C)")+
+  xlab("")+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14)) +
+  geom_hline(data=Decmean, aes(yintercept = m, col=sitename))
+
+  Dectempplot
+
+ggexport(Dectempplot, filename = "Dectempplot.pdf")
+############################## range
+dec_range<-temp_data_fullrange%>%
+  filter(month=="Dec", year==2019)
+
+decr<-dec_range%>%group_by(date,sitename) %>% dplyr::summarise(m = mean(range))
+
+decr
+decmeanr<-dec_range%>%group_by(month,sitename) %>% dplyr::summarise(m = mean(range), sd = sd(range, na.rm=TRUE))
+decmeanr
+#1 Dec   "Carysfort " 0.662 0.368
+#2 Dec   "Conch "     0.721 0.433
+#3 Dec   "Looe Key "  0.489 0.183
+#4 Dec   "Tennessee " 0.745 0.611
+######################################################## jun min max range mean
+decmin <- Dec_temp %>% group_by(date,sitename) %>% 
+  dplyr::summarise(min = min(tempC), max = max(tempC),mean =mean(tempC))%>%
+  mutate(range = max-min)
+
+decmin
+
+kruskal.test(min ~ sitename,decmin)
+#0.5922
+
+kruskal.test(max ~ sitename,decmin)
+#0.9246
+
+kruskal.test(mean ~ sitename,decmin)
+#0.9226
+
+kruskal.test(range ~ sitename,decmin)
+#0.5172
+x<-decmin$sitename
+y<-decmin$range
+pwcCP <-dunn.test::dunn.test(y,x, method = "bonferroni")
+#NA
+
+
+
+#########################################################
+
+Decmonmond <- aov(tempC~ sitename, data=Dec_temp)
+summary(Decmonmond)
+HSDmonDEC<-TukeyHSD(Decmonmond)
+HSDmonDEC
+# 0.0028815 Tenn-looe
+# tenn -cary 0.0018014
+
+```
+
+Figure of daily means for temperature
+Now I will plot the daily mean temperature for each reef zone separately but averaged over lter sites. I will use ggplot with the geom_smooth() function to get a line with 95% confidence intervals.
+
+```{r}
+#temp_data_bysite_daily$month<-as.factor(temp_data_bysite_daily$month)
+#CREMPtemps$month<-as.factor(CREMPtemps$month)
+
+#year means for all four sites 
+yearmeans<-group_by(All_temp, sitename, year) %>% summarise(m = mean(mean))
+
+group_by(yearmeans, sitename) %>% summarise(m = mean(m))
+
+#   sitename      year     m
+#   <chr>        <int> <dbl>
+# 1 "Carysfort "  2019  27.5
+# 2 "Carysfort "  2020  27.5
+# 3 "Carysfort "  2021  25.4
+# 4 "Conch "      2019  27.6
+# 5 "Conch "      2020  27.5
+# 6 "Conch "      2021  25.3
+# 7 "Looe Key "   2019  27.6
+# 8 "Looe Key "   2020  27.5
+# 9 "Looe Key "   2021  24.7
+#10 "Tennessee "  2019  27.6
+#11 "Tennessee "  2020  27.6
+#12 "Tennessee "  2021  24.6
+
+
+
+########################
+#with SD
+temp_data_bysite %>% group_by(year, sitename)%>%summarise(n = n(), mean = mean(tempC, na.rm=TRUE), sd = sd(tempC, na.rm=TRUE))
+
+#    sd
+# <dbl>
+#  2.23
+#  2.21
+#  2.31
+#  2.28
+#  2.23
+#  2.20
+#  2.32
+#  2.32
+#  1.72
+#  1.67
+#  1.45
+#  1.44
+
+yearmeansC<-group_by(All_tempC, Year) %>% summarise(m = mean(mean))
+
+group_by(yearmeansC) %>% summarise(m = mean(m))
+
+#28.5C COnch 2018
+#with SD
+CREMPtemps %>% group_by(Year)%>%summarise(n = n(), mean = mean(AvgOfTemp.C, na.rm=TRUE), sd = sd(AvgOfTemp.C, na.rm=TRUE))
+
+#   sd
+#<dbl>
+# 2.00
+yearmeansConch<-group_by(All_tempConch, year) %>% summarise(m = mean(mean))
+
+group_by(yearmeansConch) %>% summarise(m = mean(m))
+
+#   year     m
+#  <int> <dbl>
+#1  2019  27.6
+#2  2020  27.5
+#3  2021  25.3
+
+#withSD
+Conchtemps %>% group_by(year)%>%summarise(n = n(), mean = mean(tempC, na.rm=TRUE), sd = sd(tempC, na.rm=TRUE))
+#   sd
+#<dbl>
+# 2.21
+# 2.20
+# 1.67
+ 
+#Monthly by year temperature range for all four sites
+
+month<-All_temp%>%group_by(month, year, sitename) %>% summarise(m = mean(mean), sd = sd(mean, na.rm=TRUE))
+View(month)
+
+write.csv(month,"C:/Github/Orbicella_FL/R_dataOutput/monthlymeans.csv")
+
+#23.54942 30.57006 
+
+
+monthC<-All_tempC%>%group_by(Month, Year) %>% summarise(m = mean(mean))
+View(monthC)
+#2018
+#Aug-30.17191
+#Dec-25.17651
+#Jul-30.68331
+#Nov-27.15922
+#Oct-28.49249
+#Sep-29.94914
+
+monthConch<-All_tempConch%>%group_by(month, year) %>% summarise(m = mean(mean))
+View(monthConch)
+#23.72531-30.54692
+
+# All_temps are daily means
+#yearmeans
+#month are monthly means
+
+linmod <- lm(tempC~sitename *as.factor(year), data=temp_data_bysite)
+summary(linmod)
+
+linmod19 <- lm(tempC~sitename, data=temp2019)
+summary(linmod19)
+
+
+########################################################
+monmod <- aov(tempC~sitename + as.factor(month) +as.factor(year), data=temp_data_bysite)
+summary(monmod)
+HSDmon<-TukeyHSD(monmod)
+HSDmon
+# differences between months and years and sites across months and years
+# no diff between Looe/Carysfort
+#No diff between Looe and Conch
+#No difference between Tennessee/conch
+monmody <- aov(tempC~sitename +as.factor(year), data=temp_data_bysite)
+summary(monmody)
+HSDmony<-TukeyHSD(monmody)
+HSDmony
+# no difference between sites between years
+#all years are significantly different 
+#                diff         lwr         upr     p adj
+#2020-2019 -0.0604933 -0.09888585 -0.02210075 0.0006491
+#2021-2019 -2.5250231 -2.57589026 -2.47415587 0.0000000
+#2021-2020 -2.4645298 -2.51537341 -2.41368611 0.0000000
+monmodC <- aov(AvgOfTemp.C~ as.factor(Month), data=CREMPtemps)
+summary(monmodC)
+HSDmonC<-TukeyHSD(monmodC)
+HSDmonC
+# all months are significantly different
+
+monmodConch <- aov(tempC~ + as.factor(month) +as.factor(year), data=Conchtemps)
+summary(monmodConch)
+HSDmonConch<-TukeyHSD(monmodConch)
+HSDmonConch
+#differences between most months and year
+#                 diff         lwr         upr p adj
+#2020-2019 -0.05659719 -0.08226438 -0.03093001 6e-07
+#2021-2019 -0.59710485 -0.63002749 -0.56418221 0e+00
+#2021-2020 -0.54050765 -0.57341661 -0.50759870 0e+00
+
+
+meanplot <- ggplot(All_temp, aes(x=as.Date(date, format= "%m / %d / %Y"), y=mean))+
+  geom_smooth(aes(colour=sitename), alpha = 0.15)+
+    theme_bw()+
+    labs(title= "Daily temperature means", y="Daily mean temperature (°C) with 95% CI", x="Date")
+meanplot
+
+ggexport(meanplot, filename = "mean_dailytempplots.pdf")
+
+meanplotC <- ggplot(All_tempC, aes(x=as.Date(date, format= "%m / %d / %Y"), y=mean))+
+  geom_smooth(alpha = 0.15)+
+    theme_bw()+
+    labs(title= "Daily temperature means", y="Daily mean temperature (°C) with 95% CI", x="Date")
+meanplotC
+
+ggexport(meanplotC, filename = "mean_dailytempplots_conch.pdf")
+
+
+meanplotConch <- ggplot(All_tempConch, aes(x=as.Date(date, format= "%m / %d / %Y"), y=mean))+
+  geom_smooth(aes(colour=sitename), alpha = 0.15)+
+    theme_bw()+
+    labs(title= "Daily temperature means", y="Daily mean temperature (°C) with 95% CI", x="Date")
+meanplotConch
+
+ggexport(meanplotConch, filename = "mean_dailytempplots_conch19_21.pdf")
+
+
+```
+
+Total temperature compairisons
+```{r}
+Avrgtemp<-temp_data_bysite%>%
+  filter(month=="May", year==2019)
+
+all_avrg<-temp_data_bysite%>%group_by(sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+all_avrg
+
+#27.1 Cary
+#27.1 Conch
+#27.1 Looe
+#27.1 Temm
+
+montavg<-temp_data_bysite%>%group_by(sitename, date) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+
+Ju_aug<-temp_data_bysite%>% subset(month==c("Aug", "Jul"))
+ju_augavg<-Ju_aug%>%group_by(sitename, date) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+#####################################################
+colors2 <-  thematic::okabe_ito(4)
+
+
+Alltempplot<-ggplot(temp_data_bysite, aes(x = date, y = tempC, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.05)+
+  geom_point(aes(fill=sitename), size=1, alpha = 1/50)+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Daily temperature (°C)")+
+  xlab("")+
+   theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))
+  #geom_hline(data=all_avrg, aes(yintercept = m, col=sitename))
+  Alltempplot
+
+ggexport(Alltempplot, filename = "Alltempplot2.pdf")
+
+temp_data_bysite$year<-as.factor(temp_data_bysite$year)
+temp_data_bysite$month<-as.factor(temp_data_bysite$month)
+
+Allmonmond <- aov(tempC~ date*month*year*sitename, data=temp_data_bysite)
+summary(Allmonmond)
+HSDmonAll<-TukeyHSD(Allmonmond)
+HSDmonAll
+#
+#Conch -Carysfort       0.01756822 -0.03615517  0.071291603 0.8353238
+#Looe Key -Carysfort   -0.06485530 -0.11903145 -0.010679143 0.0113011*
+#Tennessee -Carysfort  -0.04553799 -0.09977716  0.008701187 0.1354615
+#Looe Key -Conch       -0.08242352 -0.13667665 -0.028170379 0.0005504*
+#Tennessee -Conch      -0.06310621 -0.11742227 -0.008790139 0.0150567*
+#Tennessee -Looe Key    0.01931731 -0.03544663  0.074081249 0.8015490
+
+Allmonmondl <- lm(tempC~ date*month*year*sitename, data=temp_data_bysite)
+summary(Allmonmondl)
+
+
+Allmonmond1 <- aov(tempC~ time+date+month+year+sitename, data=temp_data_bysite)
+summary(Allmonmond1)
+HSDmonAll1<-TukeyHSD(Allmonmond1)
+HSDmonAll1
+
+Allmonmond2 <- aov(tempC~ year*sitename, data=temp_data_bysite)
+summary(Allmonmond2)
+
+Allmonmond3 <- aov(tempC~ sitename, data=temp_data_bysite)
+summary(Allmonmond3)
+HSDmonAll3<-TukeyHSD(Allmonmond3)
+HSDmonAll3
+
+Allmonmond4 <- aov(tempC~ month* year*sitename, data=temp_data_bysite)
+summary(Allmonmond4)
+HSDmonAll4<-TukeyHSD(Allmonmond4)
+HSDmonAll4
+
+AIC(Allmonmond,Allmonmondl, Allmonmond1,Allmonmond2,Allmonmond3,Allmonmond4)
+
+
+```
+
+Environmental data from: http://serc.fiu.edu/wqmnetwork/FKNMS-CD/index
+
+```{r}
+setwd("C:/Github/Orbicella_FL/Raw Data")
+envior <- read.csv("ENVIRON.csv")
+head(envior)
+str(envior)
+envior$SITE<-as.factor(envior$SITE)
+envior$TIME<-as.factor(envior$TIME)
+```
+
+```{r}
+# select columns of interest only
+#14	16	18	20	22	24	26	28
+#30	33	36	42	44	46		
+#		49	55	56			
+
+envior2 <- envior[,c(7,9,22,28,33,36,42,44,46,47,49,54,55,56)] 
+head(envior2)
+
+envior2 <- gather(envior2, param, value, 'TN.B','TP.B','CHLA.S','TOC.B','SAL.B','TEMP.B', 'DO.B', 'Kd','TN.TP','X.SAT_B','X.Io','DSIGT')
+
+```
+
+```{r bootstrap model setup}
+## Performing the parametric bootstrapping of the model:
+bootnum = 1500 # set number of iterations (we used 2000) between 999 and 9999
+seed = 7 # seed to make results replicatable (our seed was 3)
+set.seed(7)
+```
+
+
+```{r}
+enviorpca <- envior[,c(7,9,22,28,33,36,42,44,46,47,49,54,55,56)] 
+
+## specific survey times  dataframes
+F_df <- subset(enviorpca, TIME == "0") # FEB
+M_df <- subset(enviorpca, TIME == "1") # May
+A_df <- subset(enviorpca, TIME == "2") # Sept
+D_df <- subset(enviorpca, TIME == "3") # Nov-Jan
+
+```
+
+## Principal component analyses Ecophys parameters only {.tabset}
+
+#### *Methods:*
+Principal component analysis (PCA) (function *prcomp*) of scaled and centered environmental parameters to assess differences in enviroinmental conditions across time at each transplantation site.
+Main effects (site) and (time) were evaluated with PERMANOVA using the *adonis2* function (*vegan* package; version `r packageVersion("vegan")` (Oksanen et al., 2020)).
+
+<br/>
+
+```{r}
+library(vegan)
+library(factoextra)
+library(corrplot)
+library(ggfortify)
+library(devtools)
+# set up the dataframe
+enviorpca <- unique(enviorpca) # remove any duplicate rows
+enviorpca_l <- gather(enviorpca, param, value, 3:12)
+site_pca_df <- enviorpca[3:12]
+
+# run the adonis
+s_pca_mod <- adonis2(site_pca_df ~ SITE, data = enviorpca, method = 'eu', permutations = bootnum)
+s_pca_mod # view  adonis output
+summary(s_pca_mod)
+# extract pvalues
+s_pval <- s_pca_mod["Pr(>F)"]
+# perform principal component analysis (PCA)
+s_pca <- prcomp(site_pca_df, center = TRUE, scale= TRUE)
+s_pca
+attributes(s_pca)
+s_pca$scale
+print(s_pca)
+#PC1 increases when TN, Sal, Kd, TN:TP, & O2 sat increase (positively correlated)
+#PC1 increases when TP, CHla, TOC, & temp decrease (negatively correlated)
+summary(s_pca)
+#calculate total variance explained by each principal component
+s_pca$sdev^2 / sum(s_pca$sdev^2)
+
+
+library(psych)
+pairs.panels(enviorpca[3:12],
+             gap=0,
+             bg = c("red", "yellow", "blue")[enviorpca$SITE],
+             pch=21)
+
+# temp and o2 sat negatively correlated
+# TN and TN:TP highly correlated
+# DO and %o2 sat highly negatively correlated
+#temp- DO highly negatively correlated
+
+pairs.panels(s_pca$x,
+             gap=0,
+             bg = c("red", "yellow", "blue")[enviorpca$SITE],
+             pch=21)
+autoplot(s_pca)
+autoplot(s_pca, data = enviorpca, colour = 'SITE', loadings = TRUE,
+         loadings.label = TRUE,, frame = TRUE, frame.type = 'norm',loadings.label.size = 3)
+
+fviz_eig(s_pca, addlabels = TRUE, ylim = c(0, 50))
+# first three components explain 77% of variation
+```
+
+
+```{r}
+tst <- predict(s_pca, enviorpca)
+tst <- data.frame(tst, enviorpca[2])
+
+library(nnet)
+tst$SITE <- relevel(tst$SITE, ref = "Conch Reef")
+mymodel <- multinom(SITE~PC1+PC2+PC3, data = tst)
+summary(mymodel)
+```
+
+
+```{r}
+SEig<- get_eig(s_pca)
+SEig
+
+var <- get_pca_var(s_pca)
+names(var)
+head(var$coord)
+fviz_pca_var(s_pca, col.var = "black")
+#chlor A is negatively coorelated to Kd (light coefficient) as chl increases light decreases
+#salinity increases- TOC decreases (and T phosophate)
+#as temp increases- Dissolved oxygen decreases
+head(var$cos2, 4)
+corrplot(var$cos2, is.corr=FALSE)
+fviz_cos2(s_pca, choice = "var", axes = 1:2)
+head(var$cor)
+head(var$contrib)
+#TempB 21% TOCB 10%- PC1
+#TNb 32.5%- ChlaS 19% PC2
+#SAl.B 17.5%- TOCb 14% PC3
+#TPB 44$ ChlaS 32$- pc4
+corrplot(var$contrib, is.corr=FALSE)
+
+fviz_pca_ind(s_pca, col.ind="cos2", geom = "point",
+   gradient.cols = c("white", "#2E9FDF", "#FC4E07" ))
+
+fviz_pca_ind(s_pca, label="none", habillage=enviorpca$SITE,
+     addEllipses=TRUE, ellipse.level=0.95, palette = "Dark2")
+
+fviz_pca_ind(s_pca, select.ind = list(cos2 = 40))
+
+
+fviz_pca_var(s_pca, col.var = "contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")
+             )
+fviz_pca_biplot(s_pca, label = "var", habillage=enviorpca$SITE,
+               addEllipses=TRUE, ellipse.level=0.95,
+               ggtheme = theme_minimal())
+
+# Contributions of variables to PC1
+fviz_contrib(s_pca, choice = "var", axes = 1, top = 10)
+# Contributions of variables to PC2
+fviz_contrib(s_pca, choice = "var", axes = 2, top = 10)
+fviz_contrib(s_pca, choice = "var", axes = 1:2, top = 10)
+
+```
+
+```{r}
+
+fviz_pca_biplot(s_pca, 
+                # Individuals
+                geom.ind = "point",
+                fill.ind = enviorpca$SITE, col.ind = "black",
+                pointshape = 21, pointsize = 2,
+                palette = "jco",
+                addEllipses = TRUE,
+                # Variables
+                alpha.var ="contrib", col.var = "contrib",
+                gradient.cols = "RdYlBu",
+                
+                legend.title = list(fill = "Site", color = "Contrib",
+                                    alpha = "Contrib")
+                )
+```
+
+
+Remove additional componenets that do not explain variation keep five with highest contribution:
+Temp
+Tn
+Tn:TP
+DO
+%O sat
+```{r}
+site_pca_df <- enviorpca[c(3,8:9,11:12)]
+
+# run the adonis
+s_pca_mod <- adonis2(site_pca_df ~ SITE, data = enviorpca, method = 'eu', permutations = bootnum)
+s_pca_mod # view  adonis output
+summary(s_pca_mod)
+# extract pvalues
+s_pval <- s_pca_mod["Pr(>F)"]
+# perform principal component analysis (PCA)
+s_pca <- prcomp(site_pca_df, center = TRUE, scale= TRUE)
+s_pca
+summary(s_pca)
+
+autoplot(s_pca)
+autoplot(s_pca, data = enviorpca, colour = 'SITE', loadings = TRUE,
+         loadings.label = TRUE, loadings.label.size = 3)
+
+# create labels for p values calculated above
+s_pval <-substitute(italic(P[site])==p, list(p = format(s_pval[1,1], digits = 1)))
+# site differences
+
+site_fl_pca <- autoplot(s_pca, data = enviorpca, 
+          colour = "SITE",
+         shape = "SITE",
+         fill = "SITE",               
+         frame = TRUE, 
+         frame.type = "norm",
+         frame.level= 0.95,
+         frame.alpha = 0,
+         loadings = TRUE, 
+         loadings.colour = "black", 
+         loadings.label = TRUE,
+         loadings.label.colour = "black",         
+         loadings.label.size = 5, 
+         loadings.label.hjust = 2.5, 
+         loadings.label.vjust = 1,
+         loadings.label.repel = TRUE) +
+        scale_fill_manual(values = colors2)+
+    #guides(color = guide_legend(keyheight = 0.3, nrow = 4, byrow = TRUE)) +
+  theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank(), panel.background=element_blank(),strip.background = element_blank(), panel.border = element_rect(colour = "black", fill=NA, size=1), legend.title = element_blank(), legend.background = element_rect(fill = "transparent", colour = NA)) +
+  annotate("text", x = 0, y = -1.8, label = deparse(s_pval), parse = TRUE, size = 3)
+                                                                                                                  
+
+site_fl_pca
+ggexport(site_fl_pca, filename = "site_fl_pca2.pdf")
+```
+
+```{r}
+SEig<- get_eig(s_pca)
+SEig
+var <- get_pca_var(s_pca)
+names(var)
+head(var$coord)
+head(var$cor)
+head(var$contrib)
+#TempB 31% O2 satu and dissolved o2- PC1
+#TN 48% TN:TP ratio 46% PC2
+corrplot(var$contrib, is.corr=FALSE)
+fviz_pca_var(s_pca, col.var = "contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")
+             )
+```
+
+```{r SITES PCA plot}
+
+# create labels for p values calculated above
+s_pval <-substitute(italic(P[site])==p, list(p = format(s_pval[1,1], digits = 1)))
+# site differences
+
+site_fl_pca <- autoplot(s_pca, data = enviorpca, 
+          colour = "SITE",
+         shape = "SITE",
+         fill = "SITE",               
+         frame = TRUE, 
+         frame.type = "norm",
+         frame.level= 0.95,
+         frame.alpha = 0,
+         loadings = TRUE, 
+         loadings.colour = "black", 
+         loadings.label = TRUE,
+         loadings.label.colour = "black",         
+         loadings.label.size = 5, 
+         loadings.label.hjust = 2.5, 
+         loadings.label.vjust = 1,
+         loadings.label.repel = TRUE) +
+        scale_fill_manual(values = colors2)+
+    #guides(color = guide_legend(keyheight = 0.3, nrow = 4, byrow = TRUE)) +
+  theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank(), panel.background=element_blank(),strip.background = element_blank(), panel.border = element_rect(colour = "black", fill=NA, size=1), legend.title = element_blank(), legend.background = element_rect(fill = "transparent", colour = NA)) +
+  annotate("text", x = 0, y = -1.8, label = deparse(s_pval), parse = TRUE, size = 3)
+                                                                                                                  
+
+site_fl_pca
+ggexport(site_fl_pca, filename = "site_fl_pcareduced2.pdf")
+
+```
+
+Correlation matrix The function rcorr() [in Hmisc package] can be used to compute the significance levels for pearson and spearman correlations. It returns both the correlation coefficients and the p-value of the correlation for all possible pairs of columns in the data table.
+```{r}
+flattenCorrMatrix <- function(cormat, pmat) {
+  ut <- upper.tri(cormat)
+  data.frame(
+    row = rownames(cormat)[row(cormat)[ut]],
+    column = rownames(cormat)[col(cormat)[ut]],
+    cor  =(cormat)[ut],
+    p = pmat[ut]
+    )
+}
+library(Hmisc)
+## create matrix for correlations for all
+S_corr_df2 <- rcorr(as.matrix(enviorpca[3:12])) #
+S_corr_df2 # correlation matrix
+S_corr_df2$r  # R2 of all correlations
+S_corr_df2$P  # P value of all correlations
+S_corr_df2$r[S_corr_df2$r < 0] <- 0 # this just makes negative correlations 0 since none are significant (easier for plotting)
+flattenCorrMatrix(S_corr_df2$r, S_corr_df2$P)
+#Pro- Zoox 0.28
+#Growth- Zoox 0.217 
+#NS
+
+
+pdf(file = "S_corr_df2.pdf")
+
+corrplot(S_corr_df2$r, type="upper", order="hclust", 
+         p.mat = S_corr_df2$P, sig.level = 0.05, insig = "blank")
+
+grid.echo()
+
+S_corr_df <- grid.grab()
+
+dev.off()
+```
+
+```{r}
+F_df <- subset(enviorpca, TIME == "0")
+# set up the dataframe
+F_df <- unique(F_df) # remove any duplicate rows
+F_df_l <- gather(F_df, param, value, 3:12)
+feb_pca_df <- F_df[3:12]
+
+# run the adonis
+f_pca_mod <- adonis2(feb_pca_df ~ SITE, data = F_df, method = 'eu', permutations = bootnum)
+f_pca_mod # view  adonis output
+summary(f_pca_mod)
+# extract pvalues
+f_pval <- f_pca_mod["Pr(>F)"]
+# perform principal component analysis (PCA)
+f_pca <- prcomp(feb_pca_df, center = TRUE, scale= TRUE)
+f_pca 
+summary(f_pca )
+
+autoplot(f_pca )
+autoplot(f_pca , data = F_df, colour = 'SITE', loadings = TRUE,
+         loadings.label = TRUE, loadings.label.size = 3)
+
+
+```
+
+```{r}
+SEig<- get_eig(f_pca )
+SEig
+var <- get_pca_var(f_pca )
+names(var)
+head(var$coord)
+head(var$cor)
+head(var$contrib)
+corrplot(var$contrib, is.corr=FALSE)
+fviz_pca_var(f_pca , col.var = "contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")
+             )
+```
+
+
+```{r SITES PCA plot}
+
+# create labels for p values calculated above
+f_pval <-substitute(italic(P[site])==p, list(p = format(f_pval[1,1], digits = 1)))
+# site differences
+
+feb_fl_pca <- autoplot(f_pca , data = F_df, 
+          colour = "SITE",
+         shape = "SITE",
+         fill = "SITE",               
+         frame = TRUE, 
+         frame.type = "norm",
+         frame.level= 0.95,
+         frame.alpha = 0,
+         loadings = TRUE, 
+         loadings.colour = "black", 
+         loadings.label = TRUE,
+         loadings.label.colour = "black",         
+         loadings.label.size = 5, 
+         loadings.label.hjust = 2.5, 
+         loadings.label.vjust = 1,
+         loadings.label.repel = TRUE) +
+        scale_fill_manual(values = c('red','green4', 'blue', 'orange'))+
+    guides(color = guide_legend(keyheight = 0.3, nrow = 4, byrow = TRUE)) +
+  theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank(), panel.background=element_blank(),strip.background = element_blank(), panel.border = element_rect(colour = "black", fill=NA, size=1), legend.title = element_blank(), legend.background = element_rect(fill = "transparent", colour = NA)) +
+  annotate("text", x = -1, y = -1.8, label = deparse(f_pval), parse = TRUE, size = 3)
+                                                                                                                  
+
+feb_fl_pca
+
+```
+
+```{r}
+M_df <- subset(enviorpca, TIME == "1")
+# set up the dataframe
+M_df <- unique(M_df) # remove any duplicate rows
+M_df_l <- gather(M_df, param, value, 3:12)
+may_pca_df <- M_df[3:12]
+
+# run the adonis
+m_pca_mod <- adonis2(may_pca_df ~ SITE, data = M_df, method = 'eu', permutations = bootnum)
+m_pca_mod # view  adonis output
+summary(m_pca_mod)
+# extract pvalues
+m_pval <- m_pca_mod["Pr(>F)"]
+# perform principal component analysis (PCA)
+m_pca <- prcomp(may_pca_df, center = TRUE, scale= TRUE)
+m_pca 
+summary(m_pca )
+
+autoplot(m_pca )
+autoplot(m_pca , data = M_df, colour = 'SITE', loadings = TRUE,
+         loadings.label = TRUE, loadings.label.size = 3)
+
+
+```
+
+```{r}
+SEig<- get_eig(m_pca )
+SEig
+var <- get_pca_var(m_pca )
+names(var)
+head(var$coord)
+head(var$cor)
+head(var$contrib)
+corrplot(var$contrib, is.corr=FALSE)
+fviz_pca_var(m_pca , col.var = "contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")
+             )
+```
+
+
+```{r SITES PCA plot}
+
+# create labels for p values calculated above
+m_pval <-substitute(italic(P[site])==p, list(p = format(m_pval[1,1], digits = 1)))
+# site differences
+
+may_fl_pca <- autoplot(m_pca , data = M_df, 
+          colour = "SITE",
+         shape = "SITE",
+         fill = "SITE",               
+         frame = TRUE, 
+         frame.type = "norm",
+         frame.level= 0.95,
+         frame.alpha = 0,
+         loadings = TRUE, 
+         loadings.colour = "black", 
+         loadings.label = TRUE,
+         loadings.label.colour = "black",         
+         loadings.label.size = 5, 
+         loadings.label.hjust = 2.5, 
+         loadings.label.vjust = 1,
+         loadings.label.repel = TRUE) +
+        scale_fill_manual(values = c('red','green4', 'blue', 'orange'))+
+    guides(color = guide_legend(keyheight = 0.3, nrow = 4, byrow = TRUE)) +
+  theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank(), panel.background=element_blank(),strip.background = element_blank(), panel.border = element_rect(colour = "black", fill=NA, size=1), legend.title = element_blank(), legend.background = element_rect(fill = "transparent", colour = NA)) +
+  annotate("text", x = -1, y = -1.8, label = deparse(m_pval), parse = TRUE, size = 3)
+                                                                                                                  
+
+may_fl_pca
+
+```
+
+```{r}
+A_df <- subset(enviorpca, TIME == "2")
+# set up the dataframe
+A_df <- unique(A_df) # remove any duplicate rows
+A_df_l <- gather(A_df, param, value, 3:12)
+aug_pca_df <- A_df[3:12]
+
+# run the adonis
+a_pca_mod <- adonis2(aug_pca_df ~ SITE, data = A_df, method = 'eu', permutations = bootnum)
+a_pca_mod # view  adonis output
+summary(a_pca_mod)
+# extract pvalues
+a_pval <- a_pca_mod["Pr(>F)"]
+# perform principal component analysis (PCA)
+a_pca <- prcomp(aug_pca_df, center = TRUE, scale= TRUE)
+a_pca 
+summary(a_pca)
+
+autoplot(a_pca )
+autoplot(a_pca , data = A_df, colour = 'SITE', loadings = TRUE,
+         loadings.label = TRUE, loadings.label.size = 3)
+
+
+```
+
+```{r}
+SEig<- get_eig(a_pca )
+SEig
+var <- get_pca_var(a_pca )
+names(var)
+head(var$coord)
+head(var$cor)
+head(var$contrib)
+corrplot(var$contrib, is.corr=FALSE)
+fviz_pca_var(a_pca , col.var = "contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")
+             )
+```
+
+
+```{r SITES PCA plot}
+
+# create labels for p values calculated above
+a_pval <-substitute(italic(P[site])==p, list(p = format(a_pval[1,1], digits = 1)))
+# site differences
+
+aug_fl_pca <- autoplot(a_pca , data = A_df, 
+          colour = "SITE",
+         shape = "SITE",
+         fill = "SITE",               
+         frame = TRUE, 
+         frame.type = "norm",
+         frame.level= 0.95,
+         frame.alpha = 0,
+         loadings = TRUE, 
+         loadings.colour = "black", 
+         loadings.label = TRUE,
+         loadings.label.colour = "black",         
+         loadings.label.size = 5, 
+         loadings.label.hjust = 2.5, 
+         loadings.label.vjust = 1,
+         loadings.label.repel = TRUE) +
+        scale_fill_manual(values = c('red','green4', 'blue', 'orange'))+
+    guides(color = guide_legend(keyheight = 0.3, nrow = 4, byrow = TRUE)) +
+  theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank(), panel.background=element_blank(),strip.background = element_blank(), panel.border = element_rect(colour = "black", fill=NA, size=1), legend.title = element_blank(), legend.background = element_rect(fill = "transparent", colour = NA)) +
+  annotate("text", x = -1, y = -1.8, label = deparse(a_pval), parse = TRUE, size = 3)
+                                                                                                                  
+
+aug_fl_pca
+
+```
+
+```{r}
+D_df <- subset(enviorpca, TIME == "3")
+# set up the dataframe
+D_df <- unique(D_df) # remove any duplicate rows
+D_df_l <- gather(D_df, param, value, 3:12)
+dec_pca_df <- D_df[3:12]
+
+# run the adonis
+d_pca_mod <- adonis2(dec_pca_df ~ SITE, data = D_df, method = 'eu', permutations = bootnum)
+d_pca_mod # view  adonis output
+summary(d_pca_mod)
+# extract pvalues
+d_pval <- d_pca_mod["Pr(>F)"]
+# perform principal component analysis (PCA)
+d_pca <- prcomp(dec_pca_df, center = TRUE, scale= TRUE)
+d_pca 
+summary(d_pca)
+
+autoplot(d_pca )
+autoplot(d_pca , data = D_df, colour = 'SITE', loadings = TRUE,
+         loadings.label = TRUE, loadings.label.size = 3)
+
+
+```
+
+```{r}
+SEig<- get_eig(d_pca )
+SEig
+var <- get_pca_var(d_pca )
+names(var)
+head(var$coord)
+head(var$cor)
+head(var$contrib)
+corrplot(var$contrib, is.corr=FALSE)
+fviz_pca_var(d_pca , col.var = "contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")
+             )
+```
+
+
+```{r SITES PCA plot}
+
+# create labels for p values calculated above
+d_pval <-substitute(italic(P[site])==p, list(p = format(d_pval[1,1], digits = 1)))
+# site differences
+
+dec_fl_pca <- autoplot(d_pca , data = D_df, 
+          colour = "SITE",
+         shape = "SITE",
+         fill = "SITE",               
+         frame = TRUE, 
+         frame.type = "norm",
+         frame.level= 0.95,
+         frame.alpha = 0,
+         loadings = TRUE, 
+         loadings.colour = "black", 
+         loadings.label = TRUE,
+         loadings.label.colour = "black",         
+         loadings.label.size = 5, 
+         loadings.label.hjust = 2.5, 
+         loadings.label.vjust = 1,
+         loadings.label.repel = TRUE) +
+        scale_fill_manual(values = c('red','green4', 'blue', 'orange'))+
+    guides(color = guide_legend(keyheight = 0.3, nrow = 4, byrow = TRUE)) +
+  theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank(), panel.background=element_blank(),strip.background = element_blank(), panel.border = element_rect(colour = "black", fill=NA, size=1), legend.title = element_blank(), legend.background = element_rect(fill = "transparent", colour = NA)) +
+  annotate("text", x = -1, y = -1.8, label = deparse(d_pval), parse = TRUE, size = 3)
+                                                                                                                  
+
+dec_fl_pca
+
+```
+
+```{r}
+setwd("C:/Github/Orbicella_FL/Graphs")
+
+
+site_fl_pca
+
+#
+feb_fl_pca
+may_fl_pca
+aug_fl_pca
+dec_fl_pca
+
+
+```
+
+```{r}
+All2019_temp<-temp_data_bysite%>%
+  filter(year==2019)
+
+all2019<-All2019_temp%>%group_by(date,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+Allmean<-All2019_temp%>%group_by(sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+
+All2019tempplot<-ggplot(all2019, aes(x = date, y = m, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.25)+
+  geom_point(aes(fill=sitename))+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Mean daily temperature (°C)")+
+  xlab("")+
+   theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))
+
+  All2019tempplot
+
+ggexport(All2019tempplot, filename = "All2019tempplot.pdf")
+
+##########################################################
+
+All2020_temp<-temp_data_bysite%>%
+  filter(year==2020)
+
+all2020<-All2020_temp%>%group_by(date,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+Allmean<-All2020_temp%>%group_by(sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+
+All2020tempplot<-ggplot(all2020, aes(x = date, y = m, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.25)+
+  geom_point(aes(fill=sitename))+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Mean daily temperature (°C)")+
+  xlab("")+
+   theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))
+
+  All2020tempplot
+
+ggexport(All2020tempplot, filename = "All2020tempplot.pdf")
+##########################################################
+
+All2021_temp<-temp_data_bysite%>%
+  filter(year==2021)
+
+all2021<-All2021_temp%>%group_by(date,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+Allmean<-All2021_temp%>%group_by(sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+
+All2021tempplot<-ggplot(all2021, aes(x = date, y = m, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.25)+
+  geom_point(aes(fill=sitename))+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Mean daily temperature (°C)")+
+  xlab("")+
+   theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))
+
+  All2021tempplot
+
+ggexport(All2021tempplot, filename = "All2021tempplot.pdf")
+```
+
+
+
+```{r}
+###################################April 2021
+
+Apr_temp21<-temp_data_bysite%>%
+  filter(month=="Apr", year==2021)
+
+Apr21<-Apr_temp21%>%group_by(date,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+Apr21
+
+Aprmean21<-Apr_temp21%>%group_by(month,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+#1 Apr   "Carysfort "  25.8 0.622
+#2 Apr   "Conch "      25.8 0.589
+#3 Apr   "Looe Key "   25.8 0.651
+#4 Apr   "Tennessee "  25.8 0.716
+
+
+
+Aprtempplot21<-ggplot(Apr21, aes(x = date, y = m, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.25)+
+  geom_point(aes(fill=sitename))+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Mean daily temperature (°C)")+
+  xlab("")+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14)) +
+  geom_hline(data=Aprmean21, aes(yintercept = m, col=sitename))
+  Aprtempplot21
+
+ggexport(Aprtempplot21, filename = "Aprtempplot21.pdf")
+
+Aprmonmond21 <- aov(tempC~ sitename, data=Apr_temp21)
+summary(Aprmonmond21)
+HSDmonApr21<-TukeyHSD(Aprmonmond21)
+HSDmonApr21
+#Conch -Carysfort       0.17779570  0.089943989  0.2656474 0.0000013
+#Looe Key -Carysfort    0.83571237  0.747860656  0.9235641 0.0000000
+#Tennessee -Carysfort   0.26814516  0.180293452  0.3559969 0.0000000
+#Looe Key -Conch        0.65791667  0.570064957  0.7457684 0.0000000
+#Tennessee -Conch       0.09034946  0.002497753  0.1782012 0.0410737
+#Tennessee -Looe Key   -0.56756720 -0.655418914 -0.4797155 0.0000000
+
+###################################May 2021
+May_temp21<-temp_data_bysite%>%
+  filter(month=="May", year==2021)
+
+May21<-May_temp21%>%group_by(date,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+May21
+
+Maymean21<-May_temp21%>%group_by(month,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+#1 May   "Carysfort "  27.4 0.678
+#2 May   "Conch "      27.4 0.574
+#3 May   "Looe Key "   27.4 0.523
+#4 May   "Tennessee "  27.7 0.527
+
+
+
+Maytempplot21<-ggplot(May21, aes(x = date, y = m, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.25)+
+  geom_point(aes(fill=sitename))+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Mean daily temperature (°C)")+
+  xlab("")+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14)) +
+  geom_hline(data=Maymean, aes(yintercept = m, col=sitename))
+  Maytempplot21
+
+ggexport(Maytempplot21, filename = "Maytempplot21.pdf")
+
+Maymonmond21 <- aov(tempC~ sitename, data=May_temp21)
+summary(Maymonmond21)
+HSDmonMay21<-TukeyHSD(Maymonmond21)
+HSDmonMay21
+
+#Conch -Carysfort       0.01095430 -0.06999806 0.09190666 0.9855338
+#Looe Key -Carysfort   -0.04688617 -0.16035143 0.06657910 0.7124212
+#Tennessee -Carysfort   0.22495094  0.08888835 0.36101354 0.0001310 ***
+#Looe Key -Conch       -0.05784047 -0.17130573 0.05562480 0.5561322
+#Tennessee -Conch       0.21399664  0.07793405 0.35005923 0.0003183 ***
+#Tennessee -Looe Key    0.27183711  0.11424868 0.42942553 0.0000574 ***
+############################## range
+May_range<-temp_data_fullrange%>%
+  filter(month=="May", year==2019)
+Mayr<-May_range%>%group_by(date,sitename) %>% summarise(m = mean(range))
+
+Mayr
+Maymeanr<-May_range%>%group_by(month,sitename) %>% summarise(m = mean(range), sd = sd(range, na.rm=TRUE))
+Maymeanr
+#1 May   "Carysfort " 0.644 0.181
+#2 May   "Conch "     1.26  0.700
+#3 May   "Looe Key "  0.825 0.391
+#4 May   "Tennessee " 0.963 0.517
+Maymonmondr <- aov(range~ sitename, data=May_range)
+summary(Maymonmondr)
+HSDmonMayr<-TukeyHSD(Maymonmondr)
+HSDmonMayr
+
+#Conch -Carysfort       0.6132258  0.29193156  0.93452005 0.0000131 **
+#Looe Key -Carysfort    0.1803226 -0.14097167  0.50161683 0.4634936
+#Tennessee -Carysfort   0.3187097 -0.00258457  0.64000392 0.0527221
+#Looe Key -Conch       -0.4329032 -0.75419747 -0.11160898 0.0034879 **
+#Tennessee -Conch      -0.2945161 -0.61581038  0.02677812 0.0848245
+#Tennessee -Looe Key    0.1383871 -0.18290715  0.45968134 0.6766029
+###################################June 2021
+
+Jun_temp21<-temp_data_bysite%>%
+  filter(month=="Jun", year==2021)
+
+Jun21<-Jun_temp21%>%group_by(date,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+
+Jun21
+
+Junmean21<-Jun_temp21%>%group_by(month,sitename) %>% summarise(m = mean(tempC), sd = sd(tempC, na.rm=TRUE))
+#1 Jun   "Carysfort "  25.8 0.622
+#2 Jun   "Conch "      25.8 0.589
+
+
+
+Juntempplot21<-ggplot(Jun21, aes(x = date, y = m, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.25)+
+  geom_point(aes(fill=sitename))+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Mean daily temperature (°C)")+
+  xlab("")+
+  theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14)) +
+  geom_hline(data=Junmean21, aes(yintercept = m, col=sitename))
+  Juntempplot21
+
+ggexport(Juntempplot21, filename = "Juntempplot21.pdf")
+
+Junmonmond21 <- aov(tempC~ sitename, data=Jun_temp21)
+summary(Junmonmond21)
+HSDmonJun21<-TukeyHSD(Junmonmond21)
+HSDmonJun21
+#Fit: aov(formula = tempC ~ sitename, data = Jun_temp21)
+#
+#$sitename
+#                        diff        lwr        upr p adj
+#Conch -Carysfort  -0.2559014 -0.3375057 -0.1742971     0
+
+
+############################## range
+Jun_range<-temp_data_fullrange%>%
+  filter(month=="Jun", year==2019)
+Junr<-Jun_range%>%group_by(date,sitename) %>% summarise(m = mean(range))
+
+Junr
+Junmeanr<-Jun_range%>%group_by(month,sitename) %>% summarise(m = mean(range), sd = sd(range, na.rm=TRUE))
+Junmeanr
+#1 Jun   "Carysfort " 0.862 0.296
+#2 Jun   "Conch "     1.19  0.609
+#3 Jun   "Looe Key "  0.808 0.316
+#4 Jun   "Tennessee " 1.11  0.766
+Junmonmondr <- aov(range~ sitename, data=Jun_range)
+summary(Junmonmondr)
+HSDmonJunr<-TukeyHSD(Junmonmondr)
+HSDmonJunr
+#Conch -Carysfort       0.32700000 -0.03307972  0.68707972 0.0892565
+#Looe Key -Carysfort   -0.05366667 -0.41374639  0.30641305 0.9799910
+#Tennessee -Carysfort   0.25166667 -0.10841305  0.61174639 0.2683690
+#Looe Key -Conch       -0.38066667 -0.74074639 -0.02058695 0.0339114 ****
+#Tennessee -Conch      -0.07533333 -0.43541305  0.28474639 0.9476283
+#Tennessee -Looe Key    0.30533333 -0.05474639  0.66541305 0.1264900
+
+Jun_range<-temp_data_fullrange%>%
+  filter(month=="Jun", year==2021)
+Junr<-Jun_range%>%group_by(date,sitename) %>% summarise(m = mean(range))
+
+Junr
+Junmeanr<-Jun_range%>%group_by(month,sitename) %>% summarise(m = mean(range), sd = sd(range, na.rm=TRUE))
+Junmeanr
+
+#1 Jun   "Carysfort " 0.672 0.210
+#2 Jun   "Conch "     0.507 0.152
+
+Junmonmondr <- aov(range~ sitename, data=Jun_range)
+summary(Junmonmondr)
+HSDmonJunr<-TukeyHSD(Junmonmondr)
+HSDmonJunr
+
+
+```
+Analysis of daily temperature ranges
+In this section I will explore differences in temperature ranges between the different zones over time. First I will analyse differences in daily temperature ranges between reef zones, sites, and months. In the section thereafter I will look at daily minima and maxima to look at what drives differences in daily temperature ranges.
+
+Calculate daily temperature ranges
+I will use the group_by() function to select the variables that I want to keep. I will then use the summarise() function to pick the lowest and highest temperature for each unique date using the min() and max() arguments. Lastly, I will use the mutate() function to create a new column named ‘range’ in which I subtract the minimum temperature from the daily maximum temperature for every unique day for each lter site and reef zone separately.
+
+Then, I will check the dataset using the function head() again.
+
+```{r}
+#rearange data so that conch is compared to the other sites as the interval
+str(temp_data_bysite)
+temp_data_bysite$sitename<-as.factor(temp_data_bysite$sitename)
+
+DF <- within(temp_data_bysite, sitename <- relevel(sitename, ref = 2))
+
+temp_data_fullrange <- DF %>%
+  group_by(year, month, day, sitename,date)%>%
+  summarise(min_temp = min(tempC), max_temp = max(tempC))%>%
+  mutate(range = max_temp-min_temp)
+
+head(temp_data_fullrange, digits=5)
+
+lmod<- lm(range~sitename, data=temp_data_fullrange)
+summary(lmod)
+#Coefficients:
+#                   Estimate Std. Error t value Pr(>|t|)    
+#(Intercept)         0.83563    0.01652  50.581  < 2e-16 ***
+#sitenameCarysfort  -0.14484    0.02332  -6.210 5.93e-10 ***
+#sitenameLooe Key   -0.07210    0.02356  -3.060  0.00223 ** 
+#sitenameTennessee  -0.04709    0.02359  -1.996  0.04596 * 
+  # p-value: 1.037e-08
+
+alomod<-aov(lmod)
+summary(alomod)
+#F Value: The overall F-statistic of the ANOVA model. This is calculated as Mean Sq. program / Mean sq. Residuals
+HSDranmod<-TukeyHSD(alomod)
+HSDranmod
+
+# temp range varied between sites
+#$sitename
+#                             diff         lwr         upr     p adj
+#Carysfort -Conch      -0.14484259 -0.20479387 -0.08489132 0.0000000*
+#Looe Key -Conch       -0.07209584 -0.13265058 -0.01154109 0.01195048*
+#Tennessee -Conch      -0.04709100 -0.10771745  0.01353546 0.1894550
+#Looe Key -Carysfort    0.07274676  0.01229168  0.13320184 0.0107603*
+#Tennessee -Carysfort   0.09775160  0.03722470  0.15827850 0.0001984*
+#Tennessee -Looe Key    0.02500484 -0.03611985  0.08612953 0.7190688
+
+lmodi<- lm(range~sitename* as.factor(year), data=temp_data_fullrange)
+summary(lmodi)
+#p-value: 1.693e-11
+
+alomodi<-aov(lmodi)
+summary(alomodi)
+#no interaction between site and year
+
+lmodi<- lm(range~ as.factor(year), data=temp_data_fullrange)
+summary(lmodi)
+#p-value:  6.739e-06
+
+alomodi<-aov(lmodi)
+summary(alomodi)
+HSDranmod<-TukeyHSD(alomodi)
+HSDranmod
+################# 2018
+
+CRMEP_temp_data_fullrange <- CREMPtemps %>%
+  group_by(Year, Month, Day, sitename, date)%>%
+  summarise(min_temp = min(AvgOfTemp.C), max_temp = max(AvgOfTemp.C))%>%
+  mutate(range = max_temp-min_temp)
+
+head(CRMEP_temp_data_fullrange, digits=5)
+
+lmodC<- lm(range~Month, data=CRMEP_temp_data_fullrange)
+summary(lmodC)
+# temp range varied by month
+#Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+#(Intercept)  0.620323   0.061258  10.126  < 2e-16 ***
+#MonthDec     0.132258   0.086632   1.527 0.128723    
+#MonthJul     0.359201   0.096395   3.726 0.000265 ***
+#MonthNov     0.038677   0.087351   0.443 0.658492    
+#MonthOct    -0.094839   0.086632  -1.095 0.275200    
+#MonthSep     0.009344   0.087351   0.107 0.914939
+  # p-value: 0.0002075
+
+alomodC<-aov(lmodC)
+summary(alomodC)
+#F Value: The overall F-statistic of the ANOVA model. This is calculated as Mean Sq. program / Mean sq. Residuals
+HSDranmodC<-TukeyHSD(alomodC)
+HSDranmodC
+# differences among months in dailiy range
+
+Conch_temp_data_fullrange <- Conchtemps %>%
+  group_by(year, month, day, sitename,date)%>%
+  summarise(min_temp = min(tempC), max_temp = max(tempC))%>%
+  mutate(range = max_temp-min_temp)
+
+head(Conch_temp_data_fullrange, digits=5)
+
+lmod<- lm(range~year, data=Conch_temp_data_fullrange)
+summary(lmod)
+# temp did not vary significantly over the three years
+
+#Coefficients:
+#                   Estimate Std. Error t value Pr(>|t|)    
+#(Intercept)         0.83563    0.01652  50.581  < 2e-16 ***
+#sitenameCarysfort  -0.14484    0.02332  -6.210 5.93e-10 ***
+#sitenameLooe Key   -0.07210    0.02356  -3.060  0.00223 ** 
+#sitenameTennessee  -0.04709    0.02359  -1.996  0.04596 * 
+  # p-value: 1.037e-08
+
+alomod<-aov(lmod)
+summary(alomod)
+#F Value: The overall F-statistic of the ANOVA model. This is calculated as Mean Sq. program / Mean sq. Residuals
+HSDranmod<-TukeyHSD(alomod)
+HSDranmod
+
+
+#################################################
+
+#combine Conch 2018 and Conch 2019-2021 data to compare in same dataframe
+
+#alter cloumn names in CREMPtemps and Conchtemps
+
+CREMPtemps2 <- CREMPtemps %>% rename("year" = "Year",
+                                        "month" = "Month",
+                                        "day" ="Day",
+                                      "time" = "Time",
+                                    "tempC" = "AvgOfTemp.C",
+                                    "tempF" = "AvgOfTemp.F")
+                                        
+head(CREMPtemps2)
+head(Conchtemps)
+
+# combine data frames for comparisons:
+
+conch_all <- rbind(CREMPtemps2, Conchtemps)
+head(conch_all)
+
+
+
+
+# diference in year
+tmodC<- lm(tempC~as.factor(year), data=conch_all)
+summary(tmodC)
+# temp varied by year
+#p-value: < 2.2e-16
+
+atmodC<-aov(tmodC)
+summary(atmodC)
+HSDatmodC<-TukeyHSD(atmodC)
+HSDatmodC
+#variation across years at CONCH reef
+#$`as.factor(year)`
+#                 diff        lwr         upr     p adj
+#2019-2018 -0.92812875 -1.0298969 -0.82636058 0.0000000
+#2020-2018 -0.99229394 -1.0940173 -0.89057056 0.0000000
+#2021-2018 -3.19839087 -3.3194169 -3.07736483 0.0000000
+#2020-2019 -0.06416518 -0.1457955  0.01746517 0.1807546
+#2021-2019 -2.27026212 -2.3749673 -2.16555695 0.0000000
+#2021-2020 -2.20609694 -2.3107586 -2.10143531 0.0000000
+
+# analyses temper range diff
+
+Conchall_fullrange <- conch_all %>%
+  group_by(year, month, day, sitename,date)%>%
+  summarise(min_temp = min(tempC), max_temp = max(tempC))%>%
+  mutate(range = max_temp-min_temp)
+
+head(Conchall_fullrange, digits=5)
+
+lmod<- lm(range~as.factor(year), data=Conchall_fullrange)
+summary(lmod)
+# temp ranges varied significantly over the four years
+#p-value: 0.004434
+
+alomod<-aov(lmod)
+summary(alomod)
+#F Value: The overall F-statistic of the ANOVA model. This is calculated as Mean Sq. program / Mean sq. Residuals
+HSDranmod<-TukeyHSD(alomod)
+HSDranmod
+#2018 varied by the three years- This is expected due to only having 7 months of data from 2018
+
+
+Conchall_fullrangemon <- conch_all %>%
+  group_by(year, month, sitename,date)%>%
+  summarise(min_temp = min(tempC), max_temp = max(tempC))%>%
+  mutate(range = max_temp-min_temp)
+
+head(Conchall_fullrangemon, digits=5)
+lmod<- lm(range~as.factor(year), data=Conchall_fullrange)
+summary(lmod)
+# temp ranges varied significantly over the four years
+#p-value: 0.004434
+
+alomod<-aov(lmod)
+summary(alomod)
+#F Value: The overall F-statistic of the ANOVA model. This is calculated as Mean Sq. program / Mean sq. Residuals
+HSDranmod<-TukeyHSD(alomod)
+HSDranmod
+
+
+### find difference in the same months 
+conch_all2018mon<-subset(conch_all, month==c("Aug", "Dec", "Jul", "Nov", "Oct", "Sep"))
+
+lmod<- lm(tempC~as.factor(year), data=conch_all2018mon)
+summary(lmod)
+# temp ranges did not vary significantly over the four years
+#p-value: 0.05821
+
+alomod<-aov(lmod)
+summary(alomod)
+#F Value: The overall F-statistic of the ANOVA model. This is calculated as Mean Sq. program / Mean sq. Residuals
+HSDranmod<-TukeyHSD(alomod)
+HSDranmod
+
+# when comparing just the months that had temperature data from 2018 with the cooresponding months in 2019-2021- we find no difference in monthly temperatures
+#Aug
+#Dec
+#Jul
+#Nov
+#Oct
+#Sep
+
+```
+
+figure of daily temperature ranges
+Now I will plot the daily ranges for each reef zone separately but with lter sites combined. I will use ggplot with the geom_smooth() function to get a line with 95% confidence intervals.
+
+```{r}
+testplotfull <- ggplot(data=temp_data_fullrange, 
+                   aes(x=as.Date(date, format = "%m / %d / %Y"), 
+                       y=range, colour=sitename)) +
+  geom_smooth(alpha=0.15)+ 
+  theme_classic()+
+  theme(axis.text.x = element_text(margin = margin(t=5)))+
+  labs(title="Daily temperature range all sites", y="Mean daily temperature range (°C) with 95% CI ", x="Date")
+
+testplotfull
+
+ggexport(testplotfull, filename = "testplotfull_temprange.pdf")
+
+testplotfullC <- ggplot(data=CRMEP_temp_data_fullrange, 
+                   aes(x=as.Date(date, format = "%m / %d / %Y"), 
+                       y=range)) +
+  geom_smooth(alpha=0.15)+ 
+  theme_classic()+
+  theme(axis.text.x = element_text(margin = margin(t=5)))+
+  labs(title="Daily temperature range Conch 2018", y="Mean daily temperature range (°C) with 95% CI ", x="Date")
+
+testplotfullC
+
+ggexport(testplotfullC, filename = "testplotfull_temprangeConch.pdf")
+
+testplotfullConch <- ggplot(data=Conch_temp_data_fullrange, 
+                   aes(x=as.Date(date, format = "%m / %d / %Y"), 
+                       y=range, colour=year)) +
+  geom_smooth(alpha=0.15)+ 
+  theme_classic()+
+  theme(axis.text.x = element_text(margin = margin(t=5)))+
+  labs(title="Daily temperature range Conch 2019-2021", y="Mean daily temperature range (°C) with 95% CI ", x="Date")
+
+testplotfullConch
+
+ggexport(testplotfullConch, filename = "testplotfull_temprangeConch19_21.pdf")
+
+
+testplotfullConch <- ggplot(data=Conchall_fullrange, 
+                   aes(x=as.Date(date, format = "%m / %d / %Y"), 
+                       y=range, colour=year)) +
+  geom_smooth(alpha=0.15)+ 
+  theme_classic()+
+  theme(axis.text.x = element_text(margin = margin(t=5)))+
+  labs(title="Daily temperature range Conch 2019-2021", y="Mean daily temperature range (°C) with 95% CI ", x="Date")
+
+testplotfullConch
+
+ggexport(testplotfullConch, filename = "testplotfull_temprangeConch18_21.pdf")
+
+
+```
+Calculate average daily ranges per month
+Given that the daily ranges vary so much over time, I need to calculate average ranges for separate time intervals. I will use the group_by() and the summarise function again, this time to calculate mean daily ranges per month. I will check whether this worked using nrow() to count the number of rows. The number of rows should = 209 again.
+
+```{r}
+temp_data_fullrange$year<-as.factor(temp_data_fullrange$year)
+
+temp_data_fullrangemeans <- temp_data_fullrange %>%
+  group_by(year, month, sitename, date)%>%
+  summarise(meanrange = mean(range))
+
+temp_data_fullrangemeans$year<-as.factor(temp_data_fullrangemeans$year)
+
+head(temp_data_fullrangemeans)
+
+
+Allrangemean<-temp_data_fullrange%>%group_by(year,sitename) %>% summarise(m = mean(range), sd = sd(range, na.rm=TRUE))
+Allrangemean2<-temp_data_fullrange%>%group_by(sitename) %>% summarise(m = mean(range), sd = sd(range, na.rm=TRUE))
+
+#  sitename         m    sd
+#  <fct>        <dbl> <dbl>
+#1 "Conch "     0.836 0.508
+#2 "Carysfort " 0.691 0.346
+#3 "Looe Key "  0.764 0.464
+#4 "Tennessee " 0.789 0.620
+
+allmonmond <- aov(meanrange~ year+sitename, data=temp_data_fullrangemeans)
+summary(allmonmond)
+HSDmonALL<-TukeyHSD(allmonmond)
+HSDmonALL
+allmonmond1 <- aov(meanrange~ year*sitename, data=temp_data_fullrangemeans)
+summary(allmonmond1)
+HSDmonALL1<-TukeyHSD(allmonmond1)
+HSDmonALL1
+
+AIC(allmonmond,allmonmond1)
+#allmonmond
+# yearly differences
+#2020-2019  0.0829479377  0.04031792 0.12557796 0.0000156*
+#2021-2019  0.0822500000  0.02581723 0.13868277 0.0018498*
+#2021-2020 -0.0006979377 -0.05710868 0.05571281 0.9995361
+
+#Carysfort -Conch      -0.14484259 -0.20479387 -0.08489132 0.0000000*
+#Looe Key -Conch       -0.07209584 -0.13265058 -0.01154109 0.0119504*
+#Tennessee -Conch      -0.04709100 -0.10771745  0.01353546 0.1894550
+#Looe Key -Carysfort    0.07274676  0.01229168  0.13320184 0.0107603*
+#Tennessee -Carysfort   0.09775160  0.03722470  0.15827850 0.0001984*
+#Tennessee -Looe Key    0.02500484 -0.03611985  0.08612953 0.7190688
+
+
+Allrangetempplot<-ggplot(temp_data_fullrangemeans, aes(x = date, y = meanrange, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.25)+
+  geom_point(aes(fill=sitename), size=1, alpha = .25)+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Mean daily range temperature (°C)")+
+  xlab("")#+
+  #geom_hline(data=Allmean, aes(yintercept = m, col=sitename))
+
+  Allrangetempplot
+
+ggexport(Allrangetempplot, filename = "Allrangetempplot.pdf")
+
+
+########################## max
+
+temp_data_fullmaxmeans <- temp_data_fullrange %>%
+  group_by(year, month, sitename, date)%>%
+  summarise(meanmax = mean(max_temp))
+
+
+allmaxmonmond <- aov(meanmax~ year+sitename, data=temp_data_fullmaxmeans)
+summary(allmaxmonmond)
+HSDmonALLmax<-TukeyHSD(allmaxmonmond)
+HSDmonALLmax
+
+Allmaxmean<-temp_data_fullrange%>%group_by(year,sitename) %>% summarise(m = mean(max_temp), sd = sd(max_temp, na.rm=TRUE))
+
+Allmeanmax2<-temp_data_fullrange%>%group_by(sitename) %>% summarise(m = mean(max_temp), sd = sd(max_temp, na.rm=TRUE))
+
+#  sitename         m    sd
+#  <fct>        <dbl> <dbl>
+#1 "Conch "      27.5  2.27
+#2 "Carysfort "  27.4  2.30
+#3 "Looe Key "   27.5  2.39
+#4 "Tennessee "  27.5  2.39
+
+
+Allmaxtempplot<-ggplot(temp_data_fullmaxmeans, aes(x = date, y = meanmax, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.25)+
+  geom_point(aes(fill=sitename), size=1, alpha = .25)+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Mean daily max temperature (°C)")+
+  xlab("")#+
+  #geom_hline(data=Allmean, aes(yintercept = m, col=sitename))
+
+  Allmaxtempplot
+
+ggexport(Allmaxtempplot, filename = "Allmaxtempplot.pdf")
+
+#######temp_data_fullminmeans####################################################### min
+
+temp_data_fullminmeans <- temp_data_fullrange %>%
+  group_by(year, month, sitename, date)%>%
+  summarise(meanmin = mean(min_temp))
+
+temp_data_fullminmeans <- temp_data_fullrange %>%
+  group_by(year, month, sitename, date)%>%
+  summarise(meanmin = mean(min_temp))
+
+Range<-temp_data_fullrange%>%group_by(month, year,sitename) %>% summarise(m = mean(range), sd = sd(range, na.rm=TRUE))
+
+Allmminmean2<-temp_data_fullrange%>%group_by(sitename) %>% summarise(m = mean(min_temp), sd = sd(min_temp, na.rm=TRUE))
+#  sitename         m    sd
+#  <fct>        <dbl> <dbl>
+#1 "Conch "      26.7  2.34
+#2 "Carysfort "  26.8  2.31
+#3 "Looe Key "   26.7  2.51
+#4 "Tennessee "  26.7  2.51
+
+allminmonmond <- aov(meanmin~ year+sitename, data=temp_data_fullminmeans)
+summary(allminmonmond)
+HSDmonALLmin<-TukeyHSD(allminmonmond)
+HSDmonALLmin
+
+  #              diff        lwr         upr     p adj
+#2020-2019 -0.1165164 -0.3101143  0.07708158 0.3351956
+#2021-2019 -2.5616644 -2.8179455 -2.30538328 0.0000000*
+#2021-2020 -2.4451480 -2.7013291 -2.18896697 0.0000000*
+# yearly difference no site difference
+
+
+Allmintempplot<-ggplot(temp_data_fullminmeans, aes(x = date, y = meanmin, colour = sitename)) +
+  #geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd))+
+  geom_smooth(aes(fill=sitename), alpha=0.25)+
+  geom_point(aes(fill=sitename), size=1, alpha = .25)+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  ylab("Mean daily min temperature (°C)")+
+  xlab("")#+
+  #geom_hline(data=Allmean, aes(yintercept = m, col=sitename))
+
+  Allmintempplot
+
+ggexport(Allmintempplot, filename = "Allmintempplot.pdf")
+
+########################################################
+CRMEP_temp_data_fullrangemeans <- CRMEP_temp_data_fullrange %>%
+  group_by(Year, Month)%>%
+  summarise(meanrange = mean(range))
+
+head(CRMEP_temp_data_fullrangemeans)
+
+Conch_temp_data_fullrangemeans <- Conch_temp_data_fullrange %>%
+  group_by(year, month, sitename)%>%
+  summarise(meanrange = mean(range))
+
+head(Conch_temp_data_fullrangemeans)
+
+Conchall_fullrangemon <- Conchall_fullrange %>%
+  group_by(year, month, sitename)%>%
+  summarise(meanrange = mean(range))
+
+head(Conchall_fullrangemon)
+
+hrmplot <- ggplot(temp_data_fullrangemeans, aes(x=month, y=meanrange))+
+  geom_boxplot() + theme_classic()+
+  geom_point(alpha=3/4, aes(colour=as.factor(year)))+
+  facet_grid(~fct_relevel(sitename,"Carysfort", "Conch", "Looe Key", "Tennessee"))+
+  labs(title= "Monthly averages of daily temperature range", y="Temperature (°C)", x="Date")
+
+hrmplot
+ggexport(hrmplot, filename = "monthlyavg_ofdailytemprange.pdf")
+
+hrmplotC <- ggplot(Conchall_fullrangemon, aes(x=month, y=meanrange))+
+  geom_boxplot() + theme_classic()+
+  geom_point(alpha=3/4, aes(colour=as.factor(year)))+
+  labs(title= "Monthly averages of daily temperature range", y="Temperature (°C)", x="Date")
+
+hrmplotC
+ggexport(hrmplotC, filename = "monthlyavg_ofdailytemprangeConch.pdf")
+
+```
+Test for significance differences between zones, months, and LTER sites
+Now I want to test for significant differences between years I will use an anova using the function aov()
+
+```{r}
+hobolm <- aov(meanrange~sitename + as.factor(month) + as.factor(year), data=temp_data_fullrangemeans)
+summary(hobolm)
+
+HSD <- TukeyHSD(hobolm, ordered=FALSE)
+HSD
+#                         diff         lwr        upr     p adj
+#Conch -Carysfort       0.13903950  0.01174707 0.26633192 0.0265397
+
+
+hobolm <- aov(meanrange~+ as.factor(month) + as.factor(year), data=Conchall_fullrangemon)
+summary(hobolm)
+
+HSD <- TukeyHSD(hobolm, ordered=FALSE)
+HSD
+# no difference in mean range across 4 years at Conch reef
+
+```
+
+Analysis of daily temperature minima and maxima
+In this section I will look at whether the differences in daily temperature range between back and fringe reefs are driven by differing daily minima or maxima. I will basically be doing the same thing as I did for temperature ranges but for minimum and maximum daily values.
+
+```{r}
+mintemp <- ggplot(temp_data_fullrange, aes(x=as.Date(date, format= "%m / %d / %Y"), y=min_temp))+
+  geom_smooth(aes(colour=sitename), alpha=0.15)+
+  theme_classic()+ theme(legend.position = c(0.15,0.9))+
+  labs(title="Daily temperature minima", y="Daily temperature minima (°C) with 95% CI", x="date")+
+  ylim(25,31)+
+  coord_cartesian(ylim=c(25,30))
+mintemp
+ggexport(mintemp, filename = "mintempgraph.pdf")
+
+
+
+mintempc <- ggplot(Conchall_fullrange, aes(x=as.Date(date, format= "%m / %d / %Y"), y=min_temp))+
+  geom_smooth( alpha=0.15)+
+  theme_classic()+ theme(legend.position = c(0.15,0.9))+
+  labs(title="Daily temperature minima", y="Daily temperature minima (°C) with 95% CI", x="date")+
+  ylim(25,31)+
+  coord_cartesian(ylim=c(24,31))
+mintempc
+ggexport(mintempc, filename = "mintempgraphConch.pdf")
+
+
+maxtemp <- ggplot(temp_data_fullrange, aes(x=as.Date(date, format= "%m / %d / %Y"), y=max_temp))+
+  geom_smooth(aes(colour=sitename), alpha=0.15)+
+  theme_classic()+ theme(legend.position="none")+
+  labs(title="Daily temperature maxima", y="Daily temperature maxima (°C) with 95% CI", x="date")+
+  coord_cartesian(ylim=c(23,31))
+maxtemp
+ggexport(maxtemp, filename = "maxtempgraph.pdf")
+
+maxtempc <- ggplot(Conchall_fullrange, aes(x=as.Date(date, format= "%m / %d / %Y"), y=max_temp))+
+  geom_smooth( alpha=0.15)+
+  theme_classic()+ theme(legend.position="none")+
+  labs(title="Daily temperature maxima", y="Daily temperature maxima (°C) with 95% CI", x="date")+
+  coord_cartesian(ylim=c(23,32))
+maxtempc
+ggexport(maxtempc, filename = "maxtempgraphConch.pdf")
+
+min_max<-plot_grid(mintemp, maxtemp)
+min_max
+ggexport(min_max, filename = "min_maxtempgraph.pdf")
+
+min_maxc<-plot_grid(mintempc, maxtempc)
+min_maxc
+
+```
+Calculate average monthly maximum temperatures
+Now I will calculate averages for the daily minimum and maximum temperatures to allow for easy comparison and for statistical tests.
+
+I will use the group_by() and summarise() functions to calculate monthly means.
+
+```{r}
+temp_data_fullrangeminmeans <- temp_data_fullrange %>%
+  group_by(year, month, sitename)%>%
+  summarise(meanmin = mean(min_temp))
+
+temp_data_fullrangemaxmeans <- temp_data_fullrange %>%
+  group_by(year, month, sitename)%>%
+  summarise(meanmax = mean(max_temp))
+
+head(temp_data_fullrangeminmeans)
+head(temp_data_fullrangemaxmeans)
+
+
+CREMPtemp_data_fullrangeminmeans <- Conchall_fullrange %>%
+  group_by(year,month)%>%
+  summarise(meanmin = mean(min_temp))
+
+CREMPtemp_data_fullrangemaxmeans <- Conchall_fullrange %>%
+  group_by(year,month)%>%
+  summarise(meanmax = mean(max_temp))
+
+head(CREMPtemp_data_fullrangeminmeans)
+head(CREMPtemp_data_fullrangemaxmeans)
+
+```
+
+
+Test for significance of differences between zones and years
+First I will test for differences between temperature minima then maxima.
+
+
+```{r}
+minaov <- aov(meanmin~sitename + as.factor(year), data=temp_data_fullrangeminmeans)
+summary(minaov)
+
+minHSD <- TukeyHSD(minaov, ordered=FALSE)
+minHSD
+
+minaovc <- aov(meanmin~as.factor(year), data=CREMPtemp_data_fullrangeminmeans)
+summary(minaovc)
+
+minHSDc <- TukeyHSD(minaovc, ordered=FALSE)
+minHSDc
+### No yearly difference in MIN yearly temperatures
+
+maxaov <- aov(meanmax~sitename +  as.factor(year), data=temp_data_fullrangemaxmeans)
+summary(maxaov)
+
+maxHSD <- TukeyHSD(maxaov)
+maxHSD
+
+maxaovc <- aov(meanmax~as.factor(year), data=CREMPtemp_data_fullrangemaxmeans)
+summary(maxaovc)
+
+maxHSDc <- TukeyHSD(maxaovc)
+maxHSDc
+# No difference in yearly Maxima
+
+```
+
+```{r}
+
+
+mean <- All_temp %>% 
+group_by(sitename) %>% 
+summarise(mean_val = mean(mean))
+           
+
+meanc <- All_tempC %>% 
+group_by(Year) %>% 
+summarise(mean_val = mean(mean))
+
+
+All_tempCONCH1821 <- conch_all %>%
+  group_by(sitename, date) %>%
+  mutate(mean = mean(tempC)) %>%
+  distinct(sitename, date, mean, month, year)
+           
+meanconch <- All_tempCONCH1821 %>% 
+group_by(year) %>% 
+summarise(mean_val = mean(mean))
+ library(ggrepel)
+
+dailytemp<-ggplot(All_temp,aes(x = date,y = mean)) +
+  geom_point(colour = "blue", alpha=0.25) +
+  geom_smooth(method = "gam", formula = y ~ s(x,bs="cs"), se = FALSE, color = "red",size = 1) +
+  scale_y_continuous(limits = c(21,32.5), breaks= seq(21, 33, 3)) +
+    facet_wrap(~sitename)+
+    xlab("Year") +  ylab ("Average daily temperature ( ºC )")+
+  theme_classic()
+dailytemp
+ggexport(dailytemp, filename = "dailytemp.pdf")
+
+dailytemp2<-dailytemp+ geom_hline(data=mean, aes(yintercept = mean_val, col=sitename))
+dailytemp2
+
+ggexport(dailytemp2, filename = "dailytempwithmean.pdf")
+
+dailytempc<-ggplot(All_tempC,aes(x = date,y = mean)) +
+  geom_point(colour = "blue", alpha=0.25) +
+  geom_smooth(method = "gam", formula = y ~ s(x,bs="cs"), se = FALSE, color = "red",size = 1) +
+  scale_y_continuous(limits = c(23,31.5), breaks = seq(23,31,2)) +
+    xlab("Year") +  ylab ("Average daily temperature ( ºC )")+
+  theme_classic()
+dailytempc
+ggexport(dailytempc, filename = "dailytempConch.pdf")
+
+dailytemp2c<-dailytempc+ geom_hline(data=meanc, aes(yintercept = mean_val))
+dailytemp2c
+ggexport(dailytemp2c, filename = "dailytempwithmeanConch.pdf")
+#28.4805
+
+dailytempconch<-ggplot(All_tempCONCH1821,aes(x = date,y = mean)) +
+  geom_point(colour = "blue", alpha=0.25) +
+  geom_smooth(method = "gam", formula = y ~ s(x,bs="cs"), se = FALSE, color = "red",size = 1) +
+  scale_y_continuous(limits = c(20,33), breaks = seq(20,33,2)) +
+    xlab("Year") +  ylab ("Average daily temperature ( ºC )")+
+  theme_classic()+
+  ggtitle("Conch reef")
+dailytempconch
+ggexport(dailytempconch, filename = "dailytempConch1821.pdf")
+
+dailytempconch2<-dailytempconch+ geom_hline(data=meanconch, aes(yintercept = mean_val, color= factor(year),))
+dailytempconch2
+
+ggexport(dailytempconch2, filename = "dailytempwithmeanConch1821.pdf")
+
+All_tempCONCH1821 %>% group_by(year)%>%summarise(n = n(), mean = mean(mean, na.rm=TRUE), sd = sd(mean, na.rm=TRUE))
+
+
+
+```
+
+```{r}
+All_temp %>% group_by(year)%>%summarise(n = n(), mean = mean(mean, na.rm=TRUE), sd = sd(mean, na.rm=TRUE))
+x<-c(27.6,27.5,25)
+mean(x)
+
+meantemp<-ggplot(All_temp,aes(x = date,y = mean)) + 
+  geom_point(aes(colour = mean, alpha= 0.25)) +
+  scale_colour_gradient2(low = "blue", mid = "green" , high = "red", midpoint = 26.7) + 
+  geom_smooth(method = "gam", formula = y ~ s(x,bs="cs"), se = FALSE, color = "black",size = 1) +
+  scale_y_continuous(limits = c(21,32.5), breaks = seq(21,32.5,2)) +
+  facet_wrap(~sitename)+
+  xlab("Year") +  ylab ("Daily average temperature ( ºC )")+
+  theme_classic()
+
+meantemp
+
+ggexport(meantemp, filename = "meantemp.pdf")
+
+All_tempCONCH1821 %>% group_by(year)%>%summarise(n = n(), mean = mean(mean, na.rm=TRUE), sd = sd(mean, na.rm=TRUE))
+x<-c(28.5,27.6,27.5, 25.3)
+mean(x)
+#27.225 TOTAL average temp over all years
+
+meantempC<-ggplot(All_tempCONCH1821,aes(x = date,y = mean)) + 
+  geom_point(aes(colour = mean, alpha= 0.25)) +
+  scale_colour_gradient2(low = "blue", mid = "green" , high = "red", midpoint = 27.2) + 
+  geom_smooth(method = "gam", formula = y ~ s(x,bs="cs"), se = FALSE, color = "black",size = 1) +
+  scale_y_continuous(limits = c(21,32), breaks = seq(20,32,2)) +
+  #facet_wrap(~sitename)+
+  xlab("Year") +  ylab ("Daily average temperature ( ºC )")+
+  theme_classic()
+
+meantempC
+
+ggexport(meantempC, filename = "meantempC1821.pdf")
+
+
+```
+# Distribution of the average temperature by season - density plot
+```{r}
+ggplot(All_temp,aes(x=mean, colour = sitename)) +
+  geom_density() +
+  scale_x_continuous(limits = c(15,35), breaks = seq(5,30,5)) +
+  ggtitle ("Temperature distribution by site") +
+  xlab("Average temperature ( ºC )") +  ylab ("Probability")+
+  theme_classic()
+
+ggplot(All_tempCONCH1821,aes(x=mean, colour = year)) +
+  geom_density(aes(fill= factor(year), alpha=0.4)) +
+  scale_x_continuous(limits = c(15,35), breaks = seq(5,30,5)) +
+  ggtitle ("Temperature distribution by year") +
+  xlab("Average temperature ( ºC )") +  ylab ("Probability")+
+  theme_classic()
+
+
+```
+
+```{r}
+head(conch_all)
+head(temp_data_bysite)
+d3 <- temp_data_bysite
+
+d3 <- d3 %>% group_by(sitename,date) %>% 
+  summarise(min = min(tempC), max = max(tempC),mean =mean(tempC))
+
+View(d3)
+
+dc <- conch_all
+
+dc <- dc %>% group_by(year,date) %>% 
+  summarise(min = min(tempC), max = max(tempC),mean =mean(tempC))
+
+View(dc)
+
+#to plot min max and mean on same plot reshape data frame with groupings
+d3_all <- data.frame(sitename = d3$sitename, 
+                     date= d3$date,
+                     # Reshape data frame
+                       temp = c(d3$min, d3$max, d3$mean),
+                       group = c(rep("min", nrow(d3)),
+                                 rep("max", nrow(d3)),
+                                 rep("mean", nrow(d3))))
+
+minmaxplot<- ggplot(d3_all,aes(x = date,y = temp, group= group, colour=group, fill= group)) + 
+  geom_point(alpha=0.25, size=1.5)+
+  #geom_smooth(method = "gam", formula = y ~ s(x,bs="cs"), se = FALSE, color = "black",size = 0.5, alpha= 0.25) +
+  scale_y_continuous(limits = c(20,33), breaks = seq(20,33,2))+ 
+  facet_wrap(~sitename)+
+  ggtitle ("Daily average temperature") +
+  xlab("Date") +  ylab ("Average Temperature ( ºC )")+
+  theme_classic()
+
+minmaxplot
+
+ggexport(minmaxplot, filename = "minmaxplot.pdf")
+################################################
+Allminmaxtempplot<-ggplot(d3_all, aes(x = date, y = temp, group=group, colour = group)) +
+  geom_point(aes(fill=sitename), size=1, alpha = 0.5)+
+  scale_colour_manual(values=colors2)+
+  theme_classic()+
+  scale_y_continuous(limits = c(20,33), breaks = seq(20,33,2)) +
+  facet_wrap(~sitename)+
+  ylab("Daily temperature (°C)")+
+  xlab("")+
+   theme(axis.text = element_text(size = 13))+
+  theme(axis.title = element_text(size = 14))
+  #geom_hline(data=all_avrg, aes(yintercept = m, col=sitename))
+  Allminmaxtempplot
+  ggexport(Allminmaxtempplot, filename = "Allminmaxtempplot.pdf")
+  ################
+
+minmaxplot<- ggplot(d3_all,aes(x = date,y = temp, group= group)) + 
+  geom_point(alpha=0.05, size=1.5, color= "orange")+
+  geom_smooth(aes(col=factor(group)),method = "gam", formula = y ~ s(x,bs="cs"), se = FALSE,size = 1, alpha= 0.25) +
+  scale_y_continuous(limits = c(20,33), breaks = seq(20,33,2)) +
+  facet_wrap(~sitename)+
+  ggtitle ("Daily average temperature") +
+  xlab("Date") +  ylab ("Average Temperature ( ºC )")+
+  theme_classic()
+
+minmaxplot
+
+ggexport(minmaxplot, filename = "minmaxplotGAM.pdf")
+
+
+dc_all <- data.frame(year = dc$year, 
+                     date= dc$date,
+                     # Reshape data frame
+                       temp = c(dc$min, dc$max, dc$mean),
+                       group = c(rep("min", nrow(dc)),
+                                 rep("max", nrow(dc)),
+                                 rep("mean", nrow(dc))))
+
+
+minmaxplotc<- ggplot(dc_all,aes(x = date,y = temp, group= group, colour=group, fill= group)) + 
+  geom_point(alpha=0.25, size=1.5)+
+  #geom_smooth(aes(col=factor(group)),method = "gam", formula = y ~ s(x,bs="cs"), se = FALSE,size = 1, alpha= 0.25) +
+  scale_y_continuous(limits = c(20,33), breaks = seq(20,33,2)) +
+  ggtitle ("Conch reef") +
+  xlab("Date") +  ylab ("Daily temperature ( ºC )")+
+  theme_classic()
+
+minmaxplotc
+
+ggexport(minmaxplotc, filename = "minmaxplotc1821.pdf")
+
+#add the TOTAL mean over all years
+allmeanconch <- All_tempCONCH1821 %>% 
+group_by(sitename) %>% 
+summarise(mean_val = mean(mean))
+# 27.3
+minmaxplotcM<-minmaxplotc+geom_hline(yintercept = 27.3,linetype= "dashed", col= "black")
+ggexport(minmaxplotcM, filename = "minmaxplotc1821wmean.pdf")
+
+
+minmaxplot<- ggplot(dc_all,aes(x = date,y = temp, group= group)) + 
+  geom_point(alpha=0.15, size=1.5, color= "orange")+
+  geom_smooth(aes(col=factor(group)),method = "gam", formula = y ~ s(x,bs="cs"), se = FALSE,size = 1, alpha= 0.25) +
+  scale_y_continuous(limits = c(20,33), breaks = seq(20,33,2)) +
+  ggtitle ("") +
+  xlab("Date") +  ylab ("Average daily temperature ( ºC )")+
+  theme_classic()
+
+minmaxplot
+
+ggexport(minmaxplot, filename = "minmaxplotGAM1821.pdf")
+
+
+######################### max mean and mean graphed
+
+maxmin<-ggplot(d3_all,aes(x = date,y = temp, colour=group)) + 
+  geom_point(alpha=0.05, size=1.5)+
+  geom_smooth(aes(group=group),method = "gam", formula = y ~ s(x,bs="cs"), se = FALSE, size =1)+
+  scale_color_manual(values = c("red", "black", "blue"))+
+  scale_y_continuous(limits = c(20,33), breaks = seq(20,33,2)) +
+  facet_wrap(~sitename)+
+  ggtitle ("Daily average temperature") +
+  theme_classic()+
+  xlab("Year") +  ylab ("Average Temperature ( ºC )")
+
+maxmin
+ggexport(maxmin, filename = "maxmin_dailytemp.pdf")
+
+maxmin<-ggplot(dc_all,aes(x = date,y = temp, colour=group)) + 
+  geom_point(alpha=0.15, size=1.5)+
+  geom_smooth(aes(group=group),method = "gam", formula = y ~ s(x,bs="cs"), se = FALSE, size =1)+
+  scale_color_manual(values = c("red", "black", "blue"))+
+  scale_y_continuous(limits = c(20,33), breaks = seq(20,33,2)) +
+  ggtitle ("Daily average temperature") +
+  theme_classic()+
+  xlab("Year") +  ylab ("Average Temperature ( ºC )")
+
+maxmin
+ggexport(maxmin, filename = "maxmin_dailytempC1821GAM.pdf")
+
+maxmin<-ggplot(dc_all,aes(x = date,y = temp, colour=group)) + 
+  geom_point(alpha=0.15, size=1.5)+
+  #geom_smooth(aes(group=group),method = "gam", formula = y ~ s(x,bs="cs"), se = FALSE, size =1)+
+  scale_color_manual(values = c("red", "black", "blue"))+
+  scale_y_continuous(limits = c(20,33), breaks = seq(20,33,2)) +
+  ggtitle ("Daily average temperature") +
+  theme_classic()+
+  xlab("Year") +  ylab ("Average Temperature ( ºC )")
+
+maxmin
+ggexport(maxmin, filename = "maxmin_dailytempC1821.pdf")
+
+
+```
+
+```{r}
+#install.packages("xts")
+#install.packages("tsbox")
+#install.packages("forecast")
+library(xts)
+library(tsbox)
+library(forecast)
+
+summary(d3)
+ 
+with(All_temp, boxplot(mean~sitename))
+with(temp_data_bysite, boxplot(tempC~sitename,col = c("#56B4E9", "#009E73", "#F0E442", "#CC79A7")))
+
+
+summary(dc)
+conch_all2018mon
+
+Conwint <- conch_all2018mon %>%
+  group_by(sitename, date) %>%
+  mutate(mean = mean(tempC)) %>%
+  distinct(sitename, date, mean, month, year)
+
+ 
+with(Conwint, boxplot(mean~(year)))
+with(conch_all2018mon, boxplot(tempC~year,col = c("#009E73", "#F0E442", "#CC79A7")))
+
+```
+
+
+Statistics
+
+```{r}
+
+sitemod<-lm(tempC~sitename*as.factor(year),temp_data_bysite)
+summary(sitemod)
+site<-aov(sitemod)
+flsite<-TukeyHSD(site)
+flsite
+
+
+Comod<-lm(tempC~as.factor(year),conch_all2018mon)
+summary(Comod)
+conc<-aov(Comod)
+Cosite<-TukeyHSD(conc)
+Cosite
+
+## No difference in yearly temps across months present from 2018 and corresponding months in 2019-2020
+
+```
+
+
+Sedimentation etc
+additional environmental data to explain Conch's strange responses in Dec- cooler temperatures=negative responses= not consistent with other genotypes at other sites with similar temp exposure--- sedimentation? access nutrients?
+Data taken from SERC southeast environmental research center the water quality monitoring project for the FKNMS
+http://serc.fiu.edu/wqmnetwork/FKNMS-CD/DataDL.htm
+
+```{r}
+setwd("C:/Github/Orbicella_FL/Raw Data")
+
+library(readxl)
+#setwd()
+environ <- read_excel("C:/Github/Orbicella_FL/Raw Data/Environ_CREMP.xlsx")
+env<-filter(environ,DATE>"2019-01-01")
+head(env)
+env$DATE<-as.Date(env$DATE)
+env$DATE<-as.Date(env$DATE, format ="%m/%d/%y")
+str(env)
+env2<-filter(env, STATION %in% c("216", "228", "263","243"))
+View(env2)
+env4<-env2 %>% filter(between(DATE, as.Date('2019-01-01'), as.Date('2020-01-31')))
+View(env4)
+write.csv(env4,"C:/Github/Orbicella_FL/Raw Data/ENVIRON.csv")
+
+```
+
+Data was added to health data and analyzed in Health_analyses_OR_FL_2023.Rmd
