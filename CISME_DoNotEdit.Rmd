@@ -1,0 +1,1512 @@
+---
+title: "CISME Data Output"
+author: "File: `r output_filename`"
+output: 
+  html_document:
+    theme: cerulean
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+params:
+  inputfile:
+    value: !r output_filename
+    label: "Select Input File"
+    #input: file
+  run.type:
+    label: "Run type:"
+    value: Photo + Resp
+    input: select
+    choices: [Photo + Resp, Light Curve]  
+  pi.runs:
+    value: NA
+    label: "Number of steps in PI curve: input number if not using CISME value"  
+  light.conv:
+    value: NA
+    label: "CISME light conversion value (to calculate uE/m2/s)"     
+  salinity:
+    value: NA
+    label: "Salinity: input salinity if not using CISME entered value"
+  volume:
+    value: 0.060
+    label: "Total water volume from CISME device and loop (liter)"  
+  start.dark: 
+    value: 0
+    label: "Dark minimum time (min) (used for calculating respiration rates)"
+  end.dark: 
+    value: NA
+    label: "Dark maximum time (min) (used for calculating respiration rates)"
+  start.light: 
+    value: 0
+    label: "Light minimum time (min) (used for calculating photosynthesis rates)"
+  end.light: 
+    value: NA
+    label: "Light maximum time (min) (used for calculating photosynthesis rates)"
+  TAi:
+    value: NA
+    label: "Initial measured total alkalinity (uMol/kg)"
+  TAf: 
+    value: NA
+    label: "Final measured total alkalinity (uMol/kg)"
+  SA:
+    value: 24.5
+    label: "Measured surface area (cm2) for metabolic rates"
+  biomass: 
+    value: NA
+    label: "Measured biomass (g) for metabolic rates (if not using surface area)"
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE)
+options(warn = -1)
+
+```
+
+```{r, echo = FALSE}
+
+filename <- params$inputfile
+exper <- params$run.type
+runs <- params$pi.runs
+salinity <- as.numeric(as.character(params$salinity))
+start.dark <- as.numeric(as.character(params$start.dark))
+end.dark <- as.numeric(as.character(params$end.dark))
+start.light <- as.numeric(as.character(params$start.light))
+end.light <- as.numeric(as.character(params$end.light))
+TAi <- as.numeric(as.character(params$TAi))
+TAf <- as.numeric(as.character(params$TAf))
+biomass <- as.numeric(as.character(params$biomass))
+SA <- as.numeric(as.character(params$SA ))
+volume <- as.numeric(as.character(params$volume))
+light.conv <- as.numeric(as.character(params$light.conv))
+
+```
+
+```{r, include=FALSE}
+
+library("shiny")
+library("tidyverse")
+library("ggplot2")
+library("cowplot")
+library("knitr")
+library("kableExtra")
+library("seacarb")
+library("openxlsx")
+library("DataCombine")
+date <- Sys.Date() 
+
+```
+
+
+`r if(exper != "Light Curve") {"\\begin{comment}"}`
+
+## Meta Data
+
+The is the meta data extracted from your original CISME file. It will also include any updated parameters from the user.
+
+```{r PI metadata, message = FALSE, warning = FALSE, results = FALSE, eval = (exper == "Light Curve")}
+
+output_dir <- paste(filename, "files", date, sep="_") 
+dir.create(output_dir)
+file <- paste(filename, ".csv", sep="") 
+
+raw <- read.csv(file, header = TRUE)
+
+if(length(raw) > 2) {
+  
+  Meta <- as.data.frame(raw[, 1])
+  colnames(Meta)[1] <- "Object"
+  Meta$Object <- gsub("temp.", "temp:", Meta$Object)
+  Meta <- subset(Meta, Object!=1 & Object!=2)
+  Meta <- Meta %>% separate(Object, c("Object","Value"), ":")
+  
+  Meta <- Meta %>% filter(!is.na(Value))
+  
+  Meta$Object <- gsub("Program", "Step No.", Meta$Object)
+  Meta <- subset(Meta, Object!="Step No." & Object!="Experiment Completed" & Object!="User Ended Experiment")
+  
+  sal <- subset(Meta, Object =="Salinity")
+  sal <- as.numeric(as.character(sal[, 2]))
+  T.sub <- subset(Meta, Object == "Time Threshold")
+  T.sub$Value <- as.numeric(as.character(T.sub$Value))
+  TT <- sum(T.sub$Value) #this is the total experimental time
+  
+  # Extract the data without the meta data
+  raw2 <- raw
+  raw2[] <- lapply(raw2, factor)
+  colnames(raw2) <- paste("V", seq(1:ncol(raw2)), sep = "")
+  data <- raw2 %>% filter(V1 == "1" | V1 == "2")
+  raw2$V1 <- gsub("Program", "Step No.", raw2$V1)
+  raw2 <- subset(raw2, V1=="Step No.")
+  col.names <- raw2[1,]
+  
+} else {
+  
+  raw <- read_csv(file)
+  Meta <- as.data.frame(raw[, 1])
+  colnames(Meta)[1] <- "Object"
+  Meta$Object <- gsub("temp.", "temp:", Meta$Object)
+  Meta <- subset(Meta, Object!=1 & Object!=2)
+  Meta <- Meta %>% separate(Object, c("Object","Value"), ":")
+  
+  Meta <- Meta %>% filter(!is.na(Value))
+  
+  Meta$Object <- gsub("Program", "Step No.", Meta$Object)
+  Meta <- subset(Meta, Object!="Step No." & Object!="Experiment Completed" & Object!="User Ended Experiment")
+  
+  sal <- subset(Meta, Object =="Salinity")
+  sal <- as.numeric(as.character(sal[, 2]))
+  T.sub <- subset(Meta, Object == "Time Threshold")
+  T.sub$Value <- as.numeric(as.character(T.sub$Value))
+  TT <- sum(T.sub$Value) #this is the total experimental time
+  nstep <- subset(Meta, Object == "Total number of steps")
+  nstep <- as.numeric(as.character(nstep[, 2]))  
+
+
+  # Extract the data without the meta data
+  raw2 <- raw
+  raw2[] <- lapply(raw2, factor)
+  colnames(raw2) <- "V1"
+  data <- raw2 %>% 
+    filter(grepl("^[1-9]", raw2$V1)) %>% 
+    separate(V1, paste("V", seq(1:lengths(str_split(raw2$V1[30], ","))), sep = ""), sep = ",")
+  raw2$V1 <- gsub("Program", "Step No.", raw2$V1)
+  raw2 <- raw2 %>% filter(grepl("^Step No.", raw2$V1))
+  col.names <- raw2[1,] %>% separate(V1, paste("V", seq(1:lengths(str_split(raw2$V1, ","))), sep = ""), sep = ",")
+  
+}
+
+
+# If using old firmware, need to rename a few columns to run:
+col.names$V3 <- gsub(" Cum T(m)", " Total T(m)", col.names$V3)
+col.names$V3 <- gsub("Cum", "Total", col.names$V3)
+col.names$V4 <- gsub( "O2 Per. Sat.", "O2 percent Sat.", col.names$V4)
+col.names$V4 <- gsub( "Per. Sat. 02", "O2 percent Sat.", col.names$V4)
+col.names$V4 <- gsub( "O2 PerCent Sat.", "O2 percent Sat.", col.names$V4)
+col.names$V5 <- gsub( " O2 in uMol/kg", " O2 (umol/kg)", col.names$V5)
+col.names$V9 <- gsub( " pH Sensor Voltage", " pH raw (V)", col.names$V9)
+col.names$V10 <- gsub( " ISFET Temp Sensor Voltage", " ISFET Temp raw (V)", col.names$V10)
+
+
+# Add updated column names to dataframe
+col.names[] <- lapply(col.names, factor)
+col.names <- as.vector(col.names)
+colnames(data) <- as.factor(unlist(col.names))
+data <- data %>%  select(`Step No.`, ` Total T(m)`, ` Time(m)`, ` O2 percent Sat.`, ` O2 (umol/kg)`, ` ISFET pH`, ` ISFET Temp`, ` pH raw (V)`, ` ISFET Temp raw (V)`)
+data <- mutate_all(data, function(x) as.numeric(as.character(x)))
+
+
+# set the number of steps (either from CISME or user-input)
+if (runs == "NA") {
+  step_numb <- max(data$`Step No.`)
+  runs <- step_numb
+} else {
+  step_numb <- runs
+}
+
+
+# add actual time in second to meta data
+if (step_numb == 1) {
+  
+  max <- subset(data, `Step No.`== step_numb)
+  max <- round(max(max$` Time(m)`, na.rm = TRUE), 1)
+  p2.time <- max*60
+  newrow <- c("Actual Run Time", p2.time)
+  Meta <- InsertRow(Meta, NewRow=newrow, RowNum=(which(Meta$Object == "Time Threshold")))
+  
+}
+
+
+
+# user entered number of runs instead of CISME input
+if (is.na(runs)) {
+  runs <- as.numeric(as.character(subset(Meta, Object =="Total number of steps")[,2]))
+}
+
+
+# add actual time in seconds to meta data
+if (runs > 0) {
+max <- round(max(subset(data, `Step No.`== 1)$` Time(m)`), 1)
+newrow1 <- c("Actual Run Time min (step 1)", max)
+Meta <- InsertRow(Meta, NewRow=newrow1, RowNum=17)
+}
+
+if (runs > 1) {
+max.2 <- round(max(subset(data, `Step No.`== 2)$` Time(m)`), 1)
+newrow2 <- c("Actual Run Time min (step 2)", max.2)
+Meta <- InsertRow(Meta, NewRow=newrow2, RowNum=24)
+}
+
+if (runs > 2) {
+max.3 <- round(max(subset(data, `Step No.`== 3)$` Time(m)`), 1)
+newrow3 <- c("Actual Run Time min (step 3)", max.3)
+Meta <- InsertRow(Meta, NewRow=newrow3, RowNum=31)
+}
+
+if (runs > 3) {
+max.4 <- round(max(subset(data, `Step No.`== 4)$` Time(m)`), 1)
+newrow4 <- c("Actual Run Time min (step 4)", max.4)
+Meta <- InsertRow(Meta, NewRow=newrow4, RowNum=38)
+}
+
+if (runs > 4) {
+max.5 <- round(max(subset(data, `Step No.`== 5)$` Time(m)`), 1)
+newrow5 <- c("Actual Run Time min (step 5)", max.5)
+Meta <- InsertRow(Meta, NewRow=newrow5, RowNum=45)
+}
+
+if (runs > 5) {
+max.6 <- round(max(subset(data, `Step No.`== 6)$` Time(m)`), 1)
+newrow6 <- c("Actual Run Time min (step 6)", max.6)
+Meta <- InsertRow(Meta, NewRow=newrow6, RowNum=52)
+}
+
+if (runs > 6) {
+max.7 <- round(max(subset(data, `Step No.`== 7)$` Time(m)`), 1)
+newrow7 <- c("Actual Run Time min (step 7)", max.7)
+Meta <- InsertRow(Meta, NewRow=newrow7, RowNum=59)
+}
+
+if (runs > 7) {
+max.8 <- round(max(subset(data, `Step No.`== 8)$` Time(m)`), 1)
+newrow8 <- c("Actual Run Time min (step 8)", max.8)
+Meta <- InsertRow(Meta, NewRow=newrow8, RowNum=66)
+}
+
+if (runs > 8) {
+max.9 <- round(max(subset(data, `Step No.`== 9)$` Time(m)`), 1)
+newrow9 <- c("Actual Run Time min (step 9)", max.9)
+Meta <- InsertRow(Meta, NewRow=newrow9, RowNum=73)
+}
+
+if (runs > 9) {
+max.10 <- round(max(subset(data, `Step No.`== 10)$` Time(m)`), 1)
+newrow10 <- c("Actual Run Time min (step 10)", max.10)
+Meta <- InsertRow(Meta, NewRow=newrow10, RowNum=80)
+}
+
+
+
+# Update continuous time column 'Total T(min)'
+data$` Total T(m)` <- ifelse(data$`Step No.`== 1, data$` Time(m)`, 
+                      ifelse(data$`Step No.`== 2, data$` Time(m)`+ max,
+                      ifelse(data$`Step No.`== 3, data$` Time(m)`+  max + max.2,
+                      ifelse(data$`Step No.`== 4, data$` Time(m)`+  max + max.2 + max.3,
+                      ifelse(data$`Step No.`== 5, data$` Time(m)`+  max + max.2 + max.3 + max.4,
+                      ifelse(data$`Step No.`== 6, data$` Time(m)`+  max + max.2 + max.3 + max.4 + max.5,
+                      ifelse(data$`Step No.`== 7, data$` Time(m)`+  max + max.2 + max.3 + max.4 + max.5 + max.6,
+                      ifelse(data$`Step No.`== 8, data$` Time(m)`+  max + max.2 + max.3 + max.4 + max.5 + max.6 + max.7,
+                      ifelse(data$`Step No.`== 9, data$` Time(m)`+  max + max.2 + max.3 + max.4 + max.5 + max.6 + max.7 + max.8,
+                      ifelse(data$`Step No.`== 10, data$` Time(m)`+ max + max.2 + max.3 + max.4 + max.5 + max.6 + max.7 + max.8 + max.9,
+                      NA))))))))))
+                 
+                                                                     
+# calculate overal run total time
+tot.LC.time <- round(max(data$` Total T(m)`), 1)
+
+
+# specify salinity selection
+newrow <- c("Salinity_edit", salinity)
+Meta <- InsertRow(Meta, NewRow=newrow, RowNum=(which(Meta$Object == "Salinity")))
+Meta$Object <- as.factor(Meta$Object)
+
+sal.2 <- subset(Meta, Object=="Salinity")
+sal <- as.numeric(as.character(sal.2[1,2]))
+if (!is.na(salinity)) {
+  sal <- salinity
+}
+
+
+# specify surface area/biomass selection
+if (!is.na(biomass)) {
+  SA <- SA
+}
+
+
+# add user-input values to meta data
+sa <- data.frame("Object" = c("Total Run Time (m)", "Initial Total Alkalinity (umol/kg)","Final Total Alkalinity (umol/kg)","Surface Area (cm2) / Biomass (g)", "Water Volume (L)"), "Value" = c(tot.LC.time, TAi, TAf, SA, volume))
+Meta <- rbind(Meta, sa)
+
+```
+
+```{r, eval = (exper == "Light Curve")}
+
+kable(Meta) %>%
+kable_styling(font_size = 12, full_width = FALSE)
+
+```
+
+<br/>
+
+
+## Calculated Parameters
+
+#### Corrected pH, corrected O~2~, scaled temperature, ln (O~2~)
+
+```{r, echo = FALSE, eval = (exper == "Light Curve")}
+
+# Scaled temperature
+data$` scaled temperature` <- log((298.15 - data$` ISFET Temp`)/(273.15 + data$` ISFET Temp`))
+
+
+# ln (O2) 
+data$` ln (O2)` <- (5.80871+(3.20291*data$` scaled temperature`) + ((4.17887*(data$` scaled temperature`^2) + (5.10006*data$` scaled temperature`^3) + (-0.0986643*data$` scaled temperature`^4) + (3.80369*data$` scaled temperature`^5) + ((sal*(-0.00701577+(-0.00770028*data$` scaled temperature`) + (-0.0113864*data$` scaled temperature`^2) + (-0.00951519*data$` scaled temperature`^3)))) + (-0.000000275915*sal^2))))
+
+
+# Corrected corrected O2 (umol/kg)
+data$` corrected O2 (umol/kg)` <- exp(data$` ln (O2)`) * (data$` O2 percent Sat.`/100)
+
+# round off calculated parameters 
+data$` scaled temperature` <- round(data$` scaled temperature`, 4)
+data$` ln (O2)` <- round(data$` ln (O2)`, 2)
+data$` corrected O2 (umol/kg)` <- round(data$` corrected O2 (umol/kg)`, 2)
+
+k.dat.1 <- data[1:5,]
+
+kable(k.dat.1[,-c(8:12)], caption = "First 5 rows data workup table", full_width = F) %>%
+  kable_styling(font_size = 10)
+
+```
+
+<br/>
+
+## Data Visualizations
+
+### Entire run (pH and O~2~ % sat.)
+```{r, echo=FALSE, fig.height = 3, fig.width = 8, fig.align = "center", results = 'hide', eval = (exper == "Light Curve")}
+
+# Plot of pH over course of trial
+pH.full.run <- ggplot(data, aes(` Total T(m)`, ` ISFET pH`))+
+  theme_classic()+
+  geom_line(colour = "#E69F00", size= 1.2)+
+  xlab("")+
+  ylab("pH")+
+  ggtitle("pH")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Plot of O2% over course of trial
+O2.full.run <- ggplot(data, aes(` Total T(m)`, ` O2 percent Sat.`))+
+  theme_classic()+
+  geom_line(colour = "#0072B2", size= 1.2)+
+  xlab("")+
+  ylab(expression('O'[2]~' % saturation'))+
+  ggtitle(expression('O'[2]~' % saturation'))+
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+pH.O2_plot <- plot_grid(O2.full.run, pH.full.run)
+pH.O2_plot
+
+```
+
+```{r save full run plots, echo=FALSE, results = 'hide', eval = (exper == "Light Curve")}
+
+if(exper == "Light Curve") {
+  
+ # set working directory to the output folder
+ wd.dir <- paste("/", filename, sep="")
+ wd.dir <- paste(wd.dir, "files", date, sep="_")
+ wd <- getwd() 
+ 
+ 
+ setwd(paste0(wd,wd.dir))
+ ggsave("Figure1_FullRun_LightCurve.pdf", plot = pH.O2_plot, width = 7, height = 3)
+  
+}
+
+```
+
+```{r pH and temp table, echo=FALSE, eval = (exper == "Light Curve")}
+
+summary_table <- data.frame("Parameter" = c("Temperature", "pH"))
+summary_table$`Initial value` <- c(round(mean(head(data$` ISFET Temp`)),digits = 2), round(mean(head(data$` ISFET pH`)), digits = 2))
+summary_table$`Final value` <- c(round(mean(tail(data$` ISFET Temp`)), digits = 2), round(mean(tail(data$` ISFET pH`)), digits = 2))
+summary_table$`Overall run change`<- summary_table$`Final value` - summary_table$`Initial value`
+summary_table$`Number of steps`<- c(runs, "")
+
+
+kable(summary_table) %>%
+  kable_styling(font_size = 12, full_width = F) %>% 
+  column_spec(4, color = "red") %>% 
+  column_spec(5, bold = T)
+
+```
+
+<br/>
+
+### Individual plots per step (`r runs`)
+
+```{r creating and saving step plots, echo=FALSE, fig.align='center', eval = (exper == "Light Curve")}
+
+
+## make table listing step # with corresponding light level
+steplight_df <- data.frame("Step No." = as.numeric(as.character(subset(Meta, Object == "Step Number")[,2])), "Light Level" = as.numeric(as.character(subset(Meta, Object == "Light Level")[,2])))
+
+## make empty objects to fill in from forloop below
+slope_table <- data.frame("Slopes" = integer())
+plots <- list()
+
+
+## This loops through the data to plot and calculate linear regressions of each step
+for (i in 1:runs) {
+
+  # first, will check if data needs to be clipped based on user-input time restrictions
+  if(i < 3 && (!is.na(start.dark) | !is.na(end.dark) | !is.na(start.light) | !is.na(end.light) ) ) {
+    
+    if(steplight_df[steplight_df$`Step.No.` == i, 2] > 0) { # clip data by time restrictions for light
+      step_data <- subset(data, `Step No.` == i) # subset for data from this step only
+      end.light <- ifelse(is.na(end.light), max(step_data$` Time(m)`), end.light) # supply 'end.light' value 
+      step_data <- subset(step_data, ` Time(m)` > start.light & ` Time(m)` < end.light) # select for user-selected time window
+    } else { # clip data by time restrictions for dark data
+      step_data <- subset(data, `Step No.` == i) # subset for data from this step only
+      end.dark <- ifelse(is.na(end.dark), max(step_data$` Time(m)`), end.dark) # supply 'end.light' value 
+      step_data <- subset(step_data, ` Time(m)` > start.dark & ` Time(m)` < end.dark) # select for user-selected time window
+    }
+    
+  } else { # if no user-input times are given and/or it is beyond step 2 it will just pull the data
+    step_data <- subset(data, `Step No.` == i) 
+  }
+  
+  
+  # linear model
+  step_lm <- lm(` O2 (umol/kg)` ~ ` Total T(m)`, data = step_data)
+  steplm_sum <- summary(step_lm)
+  step_coef <- summary(step_lm)$coefficients
+  step_R2 <- summary(step_lm)$adj.r.squared
+  
+  # plot step and regression/R2
+  step_fig <- ggplot() +
+    theme_classic() +
+    geom_line(data = step_data, aes(` Total T(m)`, ` O2 (umol/kg)`), colour = "#0072B2", size= 1.2) +
+    xlab("") +
+    ylab(expression('O'[2]~'('~mu~'mol/kg)')) +
+    theme(plot.title = element_text(size = 10)) +
+    ggtitle(bquote(atop("Step " ~ .(i)  ~ ": y" == .(round(step_coef[2,1],2))~"x" + .(round(step_coef[1,1],2)),
+                        ~ "R"^2 == .(round(step_R2,4)))))
+  
+  plots[[i]] <- step_fig
+  slope_table <- rbind(slope_table, round(step_coef[2,1],2))
+}
+
+
+
+## set the plotting size based on # of steps
+if (runs == 1) {
+  w <- 5
+} else if (runs == 2) {
+  w <- 7
+} else if (runs > 2) {
+  w <- 10.5
+}
+
+
+## print and save plots of individual steps
+if(exper == "Light Curve") {
+  setwd(paste0(wd,wd.dir))
+  h <- 3 * ceiling(runs / 3)
+  plotsteps <- plot_grid(plotlist = plots, ncol = 3)
+  ggsave("Figure2_StepPlot_LightCurve.pdf", plot = plotsteps, width = w, height = h)
+  plotsteps
+  
+}
+
+```
+
+<br/>
+
+## Tables and Calculated Rates
+
+### Table of O~2~ rates
+```{r table of light v slope, echo=FALSE, eval = (exper == "Light Curve")}
+
+# pull all light levels from meta df
+LL <- as.numeric(as.character(subset(Meta, Object =="Light Level")[,2]))
+
+# add light to O2 slopes
+rate_table <- cbind(LL, slope_table)
+
+# rename columns
+names(rate_table) <- c("Light setting", "O2 slope")
+
+# add column of O2 flux rate
+rate_table$`net production` <- round((rate_table$`O2 slope` * volume * 60 / SA * 1000), 1)
+
+# add column of gross production
+rate_table$`gross production` <- round((rate_table$`net production` + (rate_table$`net production`)[1] * -1), 1)
+
+# Convert CISME light setting to light level (uE/m2/s) is user provides conversion value
+if(!is.na(light.conv)) {
+  rate_table$`light level (uE/m2/s)` <- light.conv * rate_table$`Light setting` 
+}
+
+
+# markdown table
+kable(rate_table) %>%
+  kable_styling(font_size = 16, full_width = F)
+
+```
+
+<br/>
+
+### Rate of O~2~
+```{r O2 slope plot, echo=FALSE, fig.align='center', fig.width=6, fig.height=4, eval = (exper == "Light Curve")}
+
+# create plot of O2 slopes against light step
+slopeplot <- ggplot(data = rate_table, aes(x = `Light setting`, y = `O2 slope`)) +
+  theme_classic() +
+  ylab(expression('O'[2]~'slope ('~mu~'mol/kg/min)')) +
+  geom_line(colour = "#0072B2", alpha = 0.7) +
+  geom_point(colour = "#0072B2")
+
+slopeplot
+
+if(exper == "Light Curve") {
+  
+  setwd(paste0(wd,wd.dir))
+  # save plot
+  ggsave("Figure3_O2Slopes_LightCurve.pdf", plot = slopeplot, width = 3, height = 2)
+}
+
+
+```
+
+<br/>
+
+## PI Curve 
+```{r PI curve, echo=FALSE, fig.align='center', fig.width=6, fig.height=4, eval = (exper == "Light Curve")}
+
+pidata <- gather(rate_table, param, value, `net production`:`gross production`)
+
+
+if(!is.na(light.conv)) {
+  PIcurve <- ggplot(data = pidata) +
+    theme_classic() +
+    theme(legend.title = element_blank(), legend.position = "bottom") +
+    guides(fill = guide_legend(override.aes = list(linetype = 0)), color = guide_legend(override.aes = list(linetype = 0))) +
+    xlab(expression('light level ('~mu~'E/'~m^2~'/s)')) +  
+    ylab(expression('O'[2]~'rate (nmol/cm'^2~'/hr'^-1~')')) +
+    geom_line(aes(x = `light level (uE/m2/s)`, y = value, colour = param), alpha = 0.7) +
+    geom_point(aes(x = `light level (uE/m2/s)`, y = value, colour = param)) +
+    scale_colour_manual(values = c("#67a9cf", "#ef8a62"))
+} else {
+  PIcurve <- ggplot(data = pidata) +
+    theme_classic() +
+    theme(legend.title = element_blank(), legend.position = "bottom") +
+    guides(fill = guide_legend(override.aes = list(linetype = 0)), color = guide_legend(override.aes = list(linetype = 0))) +
+    ylab(expression('O'[2]~'rate (nmol/cm'^2~'/hr'^-1~')')) +
+    geom_line(aes(x = `Light setting`, y = value, colour = param), alpha = 0.7) +
+    geom_point(aes(x = `Light setting`, y = value, colour = param)) +
+    scale_colour_manual(values = c("#67a9cf", "#ef8a62"))
+}
+
+PIcurve
+
+if(exper == "Light Curve") {
+  setwd(paste0(wd,wd.dir))
+  # save plot
+  ggsave("Figure4_PIcurve_LightCurve.pdf", plot = PIcurve, width = 6, height = 4)
+}
+
+```
+
+```{r save final PI .xlsx file, echo=FALSE, warning=FALSE, message=FALSE, eval = (exper == "Light Curve")}
+
+if(exper == "Light Curve") {
+  # Save the workup data as a .xlsx (file name will be: filename_metadata_currentdate.xlsx)
+  data_s <- data
+  
+  # round values before saving final spreadsheet
+  data_s$` Time(m)` <- round(data_s$` Time(m)`, 3)
+  data_s$` Total T(m)` <- round(data_s$` Total T(m)`, 3)
+  data_s$` ISFET pH` <- round(data_s$` ISFET pH`, 3)
+  data_s$` ISFET Temp` <- round(data_s$` ISFET Temp`, 1)
+
+  # set working directory 
+  setwd(paste0(wd,wd.dir))
+  
+  ### Create workbook
+  wb <- createWorkbook()
+  
+  # add 'Analyzed CISME PI Data' worksheet
+  addWorksheet(wb, "Analyzed CISME PI Data") 
+  writeData(wb, sheet = 1, x = data_s)
+  setColWidths(wb, sheet = 1, cols = 1:17, widths = "auto")
+  
+  # add 'O2 versus light table' worksheet
+  addWorksheet(wb, "O2 versus light table") 
+  writeData(wb, sheet = 2, x = rate_table)
+  setColWidths(wb, sheet = 2, cols = 1:10, widths = "auto")
+  
+  # establigh file name 
+  xlsxFileName <- paste(filename, date, sep="_") 
+  xlsxFileName <- paste(xlsxFileName, ".xlsx", sep="")
+  
+  # save workbook
+  saveWorkbook(wb, file=xlsxFileName, overwrite = TRUE)
+  
+}
+
+```
+
+<br/>
+<br/>
+
+
+`r if(exper != "Light Curve") {"\\end{comment}"}`
+
+
+
+
+`r if(exper != "Photo + Resp") {"\\begin{comment}"}`
+
+## Meta Data
+
+The is the meta data extracted from your original CISME file. It will also include any updated parameters from the user.
+
+```{r message=FALSE, warning=FALSE, results=FALSE, eval = (exper == "Photo + Resp")}
+
+output_dir <- paste(filename, "files", date, sep="_") 
+dir.create(output_dir)
+file <- paste(filename, ".csv", sep="") 
+
+raw <- read.csv(file, header = TRUE)
+
+if(length(raw) > 2) {
+  
+  Meta <- as.data.frame(raw[, 1])
+  colnames(Meta)[1] <- "Object"
+  Meta$Object <- gsub("temp.", "temp:", Meta$Object)
+  Meta <- subset(Meta, Object!=1 & Object!=2)
+  Meta <- Meta %>% separate(Object, c("Object","Value"), ":")
+  
+  Meta <- Meta %>% filter(!is.na(Value))
+  
+  Meta$Object <- gsub("Program", "Step No.", Meta$Object)
+  Meta <- subset(Meta, Object!="Step No." & Object!="Experiment Completed" & Object!="User Ended Experiment")
+  
+  sal <- subset(Meta, Object =="Salinity")
+  sal <- as.numeric(as.character(sal[, 2]))
+  T.sub <- subset(Meta, Object == "Time Threshold")
+  T.sub$Value <- as.numeric(as.character(T.sub$Value))
+  TT <- sum(T.sub$Value) #this is the total experimental time
+  
+  # Extract the data without the meta data
+  raw2 <- raw
+  raw2[] <- lapply(raw2, factor)
+  colnames(raw2) <- paste("V", seq(1:ncol(raw2)), sep = "")
+  data <- raw2 %>% filter(V1 == "1" | V1 == "2")
+  raw2$V1 <- gsub("Program", "Step No.", raw2$V1)
+  raw2 <- subset(raw2, V1=="Step No.")
+  col.names <- raw2[1,]
+  
+} else {
+  
+  raw <- readr::read_csv(file)
+  Meta <- as.data.frame(raw[, 1])
+  colnames(Meta)[1] <- "Object"
+  Meta$Object <- gsub("temp.", "temp:", Meta$Object)
+  Meta <- subset(Meta, Object!=1 & Object!=2)
+  Meta <- Meta %>% separate(Object, c("Object","Value"), ":")
+  
+  Meta <- Meta %>% filter(!is.na(Value))
+  
+  Meta$Object <- gsub("Program", "Step No.", Meta$Object)
+  Meta <- subset(Meta, Object!="Step No." & Object!="Experiment Completed" & Object!="User Ended Experiment")
+  
+  sal <- subset(Meta, Object =="Salinity")
+  sal <- as.numeric(as.character(sal[, 2]))
+  T.sub <- subset(Meta, Object == "Time Threshold")
+  T.sub$Value <- as.numeric(as.character(T.sub$Value))
+  TT <- sum(T.sub$Value) #this is the total experimental time
+  
+  # Extract the data without the meta data
+  raw2 <- raw
+  raw2[] <- lapply(raw2, factor)
+  colnames(raw2) <- "V1"
+  data <- raw2 %>% 
+    filter(grepl("^[1-9]", raw2$V1)) %>% 
+    separate(V1, paste("V", seq(1:lengths(str_split(raw2$V1[30], ","))), sep = ""), sep = ",")
+  raw2$V1 <- gsub("Program", "Step No.", raw2$V1)
+  raw2 <- raw2 %>% filter(grepl("^Step No.", raw2$V1))
+  col.names <- raw2[1,] %>% separate(V1, paste("V", seq(1:lengths(str_split(raw2$V1, ","))), sep = ""), sep = ",")
+  
+}
+
+
+# If using old firmware, need to rename a few columns to run:
+col.names$V3 <- gsub(" Cum T(m)", " Total T(m)", col.names$V3)
+col.names$V3 <- gsub("Cum", "Total", col.names$V3)
+col.names$V4 <- gsub( "O2 Per. Sat.", "O2 percent Sat.", col.names$V4)
+col.names$V4 <- gsub( "02 percent sat.", "O2 percent Sat.", col.names$V4)
+col.names$V4 <- gsub( "Per. Sat. 02", "O2 percent Sat.", col.names$V4)
+col.names$V4 <- gsub( "O2 PerCent Sat.", "O2 percent Sat.", col.names$V4)
+col.names$V5 <- gsub( " O2 in uMol/kg", " O2 (umol/kg)", col.names$V5)
+col.names$V5 <- gsub( " O2 umol/kg", " O2 (umol/kg)", col.names$V5)
+col.names$V9 <- gsub( " pH Sensor Voltage", " pH raw (V)", col.names$V9)
+col.names$V10 <- gsub( " ISFET Temp Sensor Voltage", " ISFET Temp raw (V)", col.names$V10)
+col.names$V10 <- gsub( "raw Temp", "Temp raw", col.names$V10)
+
+
+# Add updated column names to dataframe
+col.names[] <- lapply(col.names, factor)
+col.names <- as.vector(col.names)
+colnames(data) <- as.factor(unlist(col.names))
+data <- data %>%  select(`Step No.`, ` Total T(m)`, ` Time(m)`, ` O2 percent Sat.`, ` O2 (umol/kg)`, ` ISFET pH`, ` ISFET Temp`, ` pH raw (V)`, ` ISFET Temp raw (V)`)
+data <- mutate_all(data, function(x) as.numeric(as.character(x)))
+
+
+# add actual time in second to meta data
+step_numb <- max(data$`Step No.`)
+
+if (step_numb == 1) {
+  
+  max.2 <- subset(data, `Step No.`== step_numb)
+  max.2 <- max(max.2$` Time(m)`, na.rm = TRUE)
+  p2.time <- max.2*60
+  newrow <- c("Actual Run Time", p2.time)
+  Meta <- InsertRow(Meta, NewRow=newrow, RowNum=(which(Meta$Object == "Time Threshold")))
+  
+} else {
+  
+  max <- subset(data, `Step No.`== 1)
+  max <- max(max$` Time(m)`, na.rm = TRUE)
+  p1.time <- max*60
+  newrow <- c("Actual Run Time", p1.time)
+  Meta <- InsertRow(Meta, NewRow=newrow, RowNum=(as.numeric(which(Meta$Object == "Total number of steps") + 1)))
+  
+  max.2 <- subset(data, `Step No.`== 2)
+  max.2 <- max(max.2$` Time(m)`, na.rm = TRUE)
+  p2.time <- max.2*60
+  newrow <- c("Actual Run Time", p2.time)
+  Meta <- InsertRow(Meta, NewRow=newrow, RowNum=(as.numeric(which(Meta$Object == "Total number of steps") + 7)))
+  
+} 
+
+# Update continuous time column 'Total T(min)'
+data$` Total T(m)` <- ifelse(data$`Step No.`== 1, data$` Time(m)`, data$` Time(m)`+ max)
+
+
+# specify salinity selection
+newrow <- c("Salinity_edit", salinity)
+Meta <- InsertRow(Meta, NewRow=newrow, RowNum=(which(Meta$Object == "Salinity")))
+Meta$Object <- as.factor(Meta$Object)
+
+sal.2 <- subset(Meta, Object=="Salinity")
+sal <- as.numeric(as.character(sal.2[1,2]))
+if (!is.na(salinity)) {
+  sal <- salinity
+}
+
+# specify surface area/biomass selection
+if (!is.na(biomass)) {
+  SA <- SA
+}
+
+
+# add user-input values to meta data
+sa <- data.frame("Object" = c("Initial Total Alkalinity (umol/kg)","Final Total Alkalinity (umol/kg)","Surface Area (cm2) / Biomass (g)", "Water Volume (L)"), "Value" = c(TAi, TAf, SA, volume))
+Meta <- rbind(Meta, sa)
+
+```
+
+```{r, eval = (exper == "Photo + Resp")}
+
+kable(Meta) %>%
+kable_styling(font_size = 12, full_width = FALSE)
+
+```
+
+<br/>
+
+
+## Calculated Parameters
+
+### Corrected pH, corrected O~2~, scaled temperature, ln (O~2~)
+
+```{r, echo = FALSE, eval = (exper == "Photo + Resp")}
+
+# Assign light and dark to the steps 
+meta.light <- Meta %>% filter(Object== "Step Number" | Object== "Light Level")
+meta.light$Value <- as.numeric(meta.light$Value)
+meta.light$Light <- "dark"
+meta.light$Light[meta.light$Value>0] <- "light"
+meta.light[1,3] <- "NA"
+meta.light$Light <- lead(meta.light$Light, n = 1)
+meta.light <- meta.light %>% filter(Object== "Step Number")
+meta.light$Object <- NULL
+
+# add a "Light" column to dataframe 
+data <- data %>% 
+  left_join(meta.light, by = c(`Step No.` = "Value"))
+
+
+
+# Corrected pH
+data$`corrected pH` <-  data$` ISFET pH` 
+resp.data <- subset(data, Light == "dark") # subset for dark only data for respiration rates
+photo.data <- subset(data, Light == "light") # subset for light only data for photosynthesis rates
+
+if(step_numb == 2) {
+  
+  if(meta.light[1,2] == "light") { # this runs if step 1 is light
+    
+    # remove some jumpy values
+    resp.data$`corrected pH`[1:3] <- NA
+    
+    # calculate the difference in pH between steps due to light change
+    step1.tail <- mean(tail(photo.data$`corrected pH`, 10))
+    step2.head <- mean(head(resp.data$`corrected pH`, 13), na.rm = TRUE)
+    pH.diff <- step1.tail - step2.head
+    
+    # apply correction
+    data$`corrected pH`[data$Light == "light"] <- round(data$` ISFET pH`, 4)
+    data$`corrected pH`[data$Light == "dark"] <- round(data$` ISFET pH`[data$Light == "dark"] + pH.diff, 4)
+    
+    # remove the one really off value from the light adjustment
+    skip.pH <- length(data$`corrected pH`[data$Light == "light"])
+    data$`corrected pH`[skip.pH:(skip.pH+2)] <- NA 
+    
+  } else { # this runs if step 1 is dark
+    
+    # remove some jumpy values
+    photo.data$`corrected pH`[1:3] <- NA
+    
+    # calculate the difference in pH between steps due to light change
+    step1.tail <- mean(tail(resp.data$`corrected pH`, 10))
+    step2.head <- mean(head(photo.data$`corrected pH`, 13), na.rm = TRUE)
+    pH.diff <- step1.tail - step2.head
+    
+    # apply correction
+    data$`corrected pH`[data$Light == "dark"] <- round(data$` ISFET pH`, 4)
+    data$`corrected pH`[data$Light == "light"] <- round(data$` ISFET pH`[data$Light == "light"] + pH.diff, 4)
+    
+    # remove the one really off value from the light adjustment
+    skip.pH <- length(data$`corrected pH`[data$Light == "dark"])
+    data$`corrected pH`[skip.pH:(skip.pH+2)] <- NA 
+    
+  }
+
+} else {
+  data$`corrected pH` <- round(data$` ISFET pH`, 4)
+}
+
+
+# Scaled temperature
+data$` scaled temperature` <- log((298.15-data$` ISFET Temp`)/(273.15+data$` ISFET Temp`))
+
+
+# ln (O2) 
+data$` ln (O2)` <- (5.80871+(3.20291*data$` scaled temperature`) + ((4.17887*(data$` scaled temperature`^2) + (5.10006*data$` scaled temperature`^3) + (-0.0986643*data$` scaled temperature`^4) + (3.80369*data$` scaled temperature`^5) + ((sal*(-0.00701577+(-0.00770028*data$` scaled temperature`) + (-0.0113864*data$` scaled temperature`^2) + (-0.00951519*data$` scaled temperature`^3)))) + (-0.000000275915*sal^2))))
+
+
+# Corrected corrected O2 (uMol/kg)
+data$` corrected O2 (uMol/kg)` <- exp(data$` ln (O2)`) * (data$` O2 percent Sat.`/100)
+
+data$` scaled temperature` <- round(data$` scaled temperature`, 4)
+data$` ln (O2)` <- round(data$` ln (O2)`, 2)
+data$` corrected O2 (uMol/kg)` <- round(data$` corrected O2 (uMol/kg)`, 2)
+
+# remove O2 sat data greater than 999 for glitches
+data$` O2 percent Sat.`[data$` O2 percent Sat.` > 999] <- NA
+data$` corrected O2 (uMol/kg)`[data$` corrected O2 (uMol/kg)` > 999] <- NA
+
+```
+
+```{r, echo = FALSE, eval = (exper == "Photo + Resp")}
+
+df.1 <- subset(data, `Step No.` = 1)
+df.1 <- df.1[1:5,]
+
+df.2 <- subset(data, `Step No.` == 2)
+df.2 <- df.2[1:5,]
+
+if(step_numb == 2) {
+  
+  k.dat.1 <- rbind(df.1, df.2)
+  
+  kable(k.dat.1[,-c(8:12)], caption = "First 5 rows of analyzed dark and light data", full_width = F) %>%
+  kable_styling(font_size = 10) %>% 
+  row_spec(1:5, background = "lightgrey")
+  
+} else {
+  
+  kable(df.1[,-c(8:12)], caption = "First 5 rows of analyzed single step data", full_width = F) %>%
+  kable_styling(font_size = 10)
+
+}
+
+```
+
+<br/>
+
+
+### Total Alkalinity, TCO~2~, and calcification rate
+
+**Units for the calculated parameters are as follows:**   
+
+* Total Alkalinity (uMol/Kg)   
+* TCO~2~ (uMol/Kg; calculated using R package *seacarb*)
+* calcification rate (nMol/cm^2^)
+
+<font color='#D55E00'>`r ifelse(!is.na(TAi), print(""), print("*No total alkalinity values (initial and final) were supplied so table was not constructed.*"))`</font> 
+
+```{r, echo = FALSE, eval = (exper == "Photo + Resp")}
+
+# setting dark/light times
+light.level <- subset(Meta, Object == "Light Level")
+tot.time <- subset(Meta, Object == "Actual Run Time")
+
+# method to calculate Ltime/Dtime (depending on single or multiple steps)
+if (step_numb == 1) {
+  
+    if (as.numeric(light.level[1,2]) == 0) {
+    Dtime <- as.numeric(as.character(tot.time[1,2]))/60
+    Ltime <- NA
+    } else {
+      Ltime <- as.numeric(as.character(tot.time[1,2]))/60
+      Dtime <- NA
+    }
+  
+} else {
+  
+  if (as.numeric(light.level[1,2]) == 0) {
+    Ltime <- as.numeric(as.character(tot.time[1,2]))/60
+    } else {
+      Dtime <- as.numeric(as.character(tot.time[1,2]))/60
+    }
+  
+  if (as.numeric(light.level[1,2]) == 0) {
+    Dtime <- as.numeric(as.character(tot.time[2,2]))/60
+    } else {
+      Ltime <- as.numeric(as.character(tot.time[2,2]))/60
+    }
+  
+}
+
+
+# if no dark/light time maximum is set, this makes the value equal to total dark/light times
+
+if (is.na(end.dark)) {
+  end.dark <- Dtime
+}
+
+if (is.na(end.light)) {
+  end.light <- Ltime
+}
+
+```
+
+
+```{r, echo = FALSE, eval = (exper == "Photo + Resp")}
+
+if(!is.na(TAi)) {
+
+# Calculate TA parameters
+delTA <- TAf - TAi
+slope.TA <- delTA / max(data$` Total T(m)`)
+data$`Interpolated TA`[data$Light == "light"] <- TAi + (slope.TA * data$` Time(m)`[data$Light == "light"])
+
+
+# use seacarb package to calculate carbonate parameters and add DIC to main dataframe 
+carb.param<- carb(flag=8, var1=data$`corrected pH`, var2=(data$`Interpolated TA`)/1000000, S=sal, T=data$` ISFET Temp`, P=0, Pt=0, Sit=0, k1k2="r", ks = "d", pHscale="SWS") 
+# Cannot use Merbauch, currently using: K1 and K2 from Lueker et al. (2000)
+
+data$`Calculated TCO2` <- carb.param$DIC * 1000000
+
+
+data$`Interpolated TA` <- round(data$`Interpolated TA`, 2)
+data$`Calculated TCO2` <- round(data$`Calculated TCO2`, 2)
+
+df.1 <- subset(data, `Step No.` = 1)
+df.1 <- df.1[1:5,]
+
+
+kable(df.1[,c(1:2,15:16)], caption = "First 5 rows of analyzed TA, and TCO2 data") %>%
+  kable_styling(font_size = 10, full_width = F)
+}
+
+```
+
+
+<br/>
+
+## Run Summary Table
+
+```{r, echo=FALSE, eval = (exper == "Photo + Resp")}
+
+resp.data <- subset(data, Light == "dark") # subset for dark only data for respiration rates
+photo.data <- subset(data, Light == "light") # subset for light only data for photosynthesis rates
+
+summary.table <- data.frame("Parameter" = c("Temperature", "pH"))
+summary.table$`Initial Dark Value (Respiration)` <- c(round(mean(head(resp.data$` ISFET Temp`)),digits = 2), round(mean(head(resp.data$`corrected pH`)), digits = 3))
+summary.table$`Final Dark Value (Respiration)`<- c(round(mean(tail(resp.data$` ISFET Temp`)), digits = 3), round(mean(tail(resp.data$`corrected pH`)), digits = 3))
+summary.table$`Dark Delta (Respiration)`<- summary.table$`Final Dark Value (Respiration)` - summary.table$`Initial Dark Value (Respiration)`
+summary.table$`Initial Light Value (Photosynthesis)`<- c(round(mean(head(photo.data$` ISFET Temp`)),digits = 3), round(mean(head(photo.data$`corrected pH`)), digits = 3))
+summary.table$`Final Light Value (Photosynthesis)`<- c(round(mean(tail(photo.data$` ISFET Temp`)), digits = 3), round(mean(tail(photo.data$`corrected pH`)), digits = 3))
+summary.table$`Light Delta (Photosynthesis)`<- summary.table$`Final Light Value (Photosynthesis)` - summary.table$`Initial Light Value (Photosynthesis)`
+
+
+## Filling the overall run delta value based on if it is P, R, or P+R run
+if(step_numb == 2) {
+  summary.table$`Overall Run Delta`<- summary.table$`Final Light Value (Photosynthesis)` - summary.table$`Initial Dark Value (Respiration)`
+} else {
+  
+  if(nrow(resp.data) < 1) {
+    summary.table$`Overall Run Delta`<- summary.table$`Light Delta (Photosynthesis)`
+  } else {
+    summary.table$`Overall Run Delta`<- summary.table$`Dark Delta (Respiration)`
+  }
+}
+
+
+
+## Nice table for markdown
+kable(summary.table) %>%
+  kable_styling(font_size = 12, full_width = F) %>% 
+  column_spec(8, bold = T, color = "red") %>% 
+  column_spec(c(4,7), bold = T) %>% 
+  column_spec(2:4, background = "lightgrey")
+
+```
+
+<br/>
+
+
+## Data Visualizations
+
+### pH and % O2 saturation over time
+
+```{r, echo=FALSE, fig.height = 5, fig.width = 8, fig.align = "center", results = 'hide', eval = (exper == "Photo + Resp")}
+
+# Plot of pH over course of trial
+pH.full.run <- ggplot(data, aes(` Total T(m)`, `corrected pH`))+
+  theme_classic()+
+  geom_line(colour = "#E69F00", size= 1.2)+
+  xlab("")+
+  ylab("pH")+
+  ggtitle("pH")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Plot of O2% over course of trial
+O2.full.run <- ggplot(data, aes(` Total T(m)`, ` O2 percent Sat.`))+
+  theme_classic()+
+  geom_line(colour = "#0072B2", size= 1.2)+
+  xlab("")+
+  ylab(expression('O'[2]~' % saturation'))+
+  ggtitle(expression('O'[2]~' % saturation'))+
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+# Plot of pH
+pH.LD.run <- ggplot()+
+  geom_line(data = resp.data, aes(` Time(m)`, `corrected pH`), colour = "#D55E00", size=1.5)+
+  geom_line(data = photo.data, aes(` Time(m)`, `corrected pH`), colour = "#009E73", size=1.5)+
+  theme_classic()+
+  xlab("Time (m)")+
+  ylab("pH")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Plot of O2% 
+O2.LD.run <- ggplot(data, aes(` Total T(m)`, ` O2 percent Sat.`))+
+  geom_line(data = resp.data, aes(` Time(m)`, ` O2 percent Sat.`), colour = "#D55E00", size=1.5)+
+  geom_line(data = photo.data, aes(` Time(m)`, ` O2 percent Sat.`), colour = "#009E73", size=1.5)+
+  theme_classic()+
+  xlab("Time (m)")+
+  ylab(expression('O'[2]~' % saturation'))+
+  theme(plot.title = element_text(hjust = 0.5))
+
+pH.O2_plot <- plot_grid(O2.full.run, pH.full.run, scale=0.85, labels = c("A", "B"))
+pH.O2_LD_plot <- plot_grid(O2.LD.run, pH.LD.run, scale=0.85, labels = c("C", "D"))
+full_pH.O2_plot <- plot_grid(pH.O2_plot, pH.O2_LD_plot, ncol = 1)
+full_pH.O2_plot
+
+
+
+### Save the figure:
+# set working directory to the output folder
+wd.dir <- paste("/", filename, sep="")
+wd.dir <- paste(wd.dir, "files", date, sep="_")
+wd <- getwd() 
+setwd(paste0(wd,wd.dir))
+
+ggsave("Figure1_phO2_PR.pdf", plot = full_pH.O2_plot, width = 7, height = 5)
+
+```
+
+**Figure 1 |** Oxygen saturation (O~2~ % Sat.) and pH measured in the experimental run. (**A**) The full O~2~ % saturation (<font color='#0072B2'>blue</font>) and (**B**) pH (<font color='#E69F00'>orange</font>) throughout the duration of the experimental run. (**C**) O~2~ and (**D**) pH are then separated out by light (<font color='#009E73'>green</font>) and dark (<font color='#D55E00'>red</font>) components of the run (if applicable).
+
+<br/>
+
+
+### Dark respiration rates
+
+`r ifelse(exper == "Photo + Resp" && is.na(Dtime), print("*Entire run was in the light so no dark rates were calculated.*"), print(""))`
+
+
+```{r, echo=FALSE, eval = (exper == "Photo + Resp")}
+
+# determine the respiration data
+if ("dark" %in% data$Light) {
+  
+  resp.data <- subset(resp.data, ` Time(m)` > start.dark & ` Time(m)` < end.dark) # subset for dark only data for respiration rates
+  
+} else {
+  
+  resp.data = NA
+  
+}
+
+
+# calculate photo summary stats
+if (!is.na(resp.data[1,2])) {
+ 
+   # O2
+  dark.O2.lm <- lm(` corrected O2 (uMol/kg)` ~ ` Total T(m)`, data=resp.data)
+  dark.O2.lm.sum <- summary(dark.O2.lm)
+  darkO2coef <- summary(dark.O2.lm)$coefficients
+  darkO2R2 <- summary(dark.O2.lm)$adj.r.squared
+  
+  # TCO2
+  if(!is.na(TAi)) {
+    dark.TCO2.lm <- lm(`Calculated TCO2` ~ ` Total T(m)`, data=resp.data)
+    dark.TCO2.lm.sum <- summary(dark.TCO2.lm)
+    darkTCO2coef <- summary(dark.TCO2.lm)$coefficients
+    darkTCO2R2 <- summary(dark.TCO2.lm)$adj.r.squared
+  }
+  
+}
+
+```
+
+```{r echo=FALSE, fig.align="center", fig.height=3.5, fig.width=9, message=FALSE, results = 'hide', eval = (exper == "Photo + Resp")}
+
+if (!is.na(resp.data[1,2])) {
+  
+  # Plot of O2 in the dark (respiration) over time
+  resp.O2.fig <- ggplot(resp.data, aes(` Total T(m)`, ` corrected O2 (uMol/kg)`))+
+    theme_classic()+
+    #geom_line(colour = "#D55E00", size=1.2)+
+    geom_point(colour = "#D55E00", size=1.2)+  
+    xlab("Time (m)")+
+    ylab(expression('O'[2]~'('~mu~'mol/kg)'))+
+    ggtitle(bquote(bold(atop("O2: y" == .(round(darkO2coef[2,1],2))~"x" + .(round(darkO2coef[1,1],2)),
+                   ~ "R"^2 == .(round(darkO2R2,4))))))+
+    theme(plot.title = element_text(hjust = 0.5))+
+    geom_smooth(method="lm", se=F, colour = "#D55E00")
+  
+  
+  if(!is.na(TAi)) {
+  # Plot of TCO2 in the dark (respiration) over time
+  resp.TCO2.fig <- ggplot(resp.data, aes(` Total T(m)`, `Calculated TCO2`))+
+    theme_classic()+
+    #geom_line(colour = "#D55E00", size = 1.2)+
+    geom_point(colour = "#D55E00", size = 1.2)+
+    xlab("Time (m)")+
+    ylab(expression(' Calculated TCO'[2]~'('~mu~'mol/kg)'))+
+    ggtitle(bquote(bold(atop("TCO2: y" == .(round(darkTCO2coef[2,1],2))~"x" + .(round(darkTCO2coef[1,1],2)),
+                   ~ "R"^2 == .(round(darkTCO2R2,4))))))+
+    geom_smooth(method="lm", se=F, colour = "#D55E00")+
+    theme(plot.title = element_text(hjust = 0.5))
+  
+  Resp_rates_plot <- plot_grid(resp.O2.fig, resp.TCO2.fig, label_size = 12, scale=0.85)
+  Resp_rates_plot
+  
+  } else {
+    resp.O2.fig
+  }
+  
+}  
+
+```
+
+<br/>
+
+
+### Light photosynthesis rates
+
+`r ifelse(exper == "Photo + Resp" && is.na(Ltime), print("*Entire run was in the dark so no light rates were calculated.*"), print(""))`
+
+```{r, echo=FALSE, message=FALSE, eval = (exper == "Photo + Resp")}
+
+# determine the photosynthesis data
+if("light" %in% data$Light){
+  
+  photo.data <- subset(photo.data, ` Time(m)` > start.light & ` Time(m)` < end.light) # subset for light only data for photosynthesis rates
+  
+  }else{
+  
+  photo.data = NA
+  
+  }
+
+# calculate photo summary stats
+if(!is.na(photo.data[1,2])) {
+  
+  # O2
+  light.O2.lm <- lm(` corrected O2 (uMol/kg)` ~ ` Total T(m)`, data=photo.data)
+  light.O2.lm.sum <- summary(light.O2.lm)
+  lightO2coef <- summary(light.O2.lm)$coefficients
+  lightO2R2 <- summary(light.O2.lm)$adj.r.squared
+  
+  # TCO2
+  if(!is.na(TAi)) {
+    light.TCO2.lm <- lm(`Calculated TCO2` ~ ` Total T(m)`, data=photo.data)
+    light.TCO2.lm.sum <- summary(light.TCO2.lm)
+    lightTCO2coef <- summary(light.TCO2.lm)$coefficients
+    lightTCO2R2 <- summary(light.TCO2.lm)$adj.r.squared
+  }
+  
+}
+
+```
+
+```{r echo=FALSE, fig.align="center", fig.height=3.5, fig.width=9, message=FALSE, warning=FALSE, results='hide', eval = (exper == "Photo + Resp")}
+
+if(!is.na(photo.data[1,2])){
+
+  # Plot of O2 in the light (photosynthesis) over time
+  photo.O2.fig <- ggplot(photo.data, aes(` Total T(m)`, ` corrected O2 (uMol/kg)`))+
+    theme_classic()+
+    #geom_line(colour = "#009E73", size=1.2)+
+    geom_point(colour = "#009E73", size=1.2)+  
+    xlab("Time (m)")+
+    ylab(expression('O'[2]~'('~mu~'mol/kg)'))+
+    ggtitle(bquote(bold(atop("O2: y" == .(round(lightO2coef[2,1],2))~"x" + .(round(lightO2coef[1,1],2)),
+                   ~ "R"^2 == .(round(lightO2R2,4))))))+
+    geom_smooth(method="lm", se=F, colour = "#009E73")+
+    theme(plot.title = element_text(hjust = 0.5))
+  
+  # Plot of TCO2 in the light (photosynthesis) over time
+  if(!is.na(TAi)){
+    
+    photo.TCO2.fig <- ggplot(photo.data, aes(` Total T(m)`, `Calculated TCO2`))+
+      theme_classic()+
+      #geom_line(colour = "#009E73", size = 1.2)+
+      geom_point(colour = "#009E73", size = 1.2)+
+      xlab("Time (m)")+
+      ylab(expression('Calculated TCO'[2]~' ('~mu~'mol/kg)'))+
+      ggtitle(bquote(bold(atop("TCO2: y" == .(round(lightTCO2coef[2,1],2))~"x" + .(round(lightTCO2coef[1,1],2)),
+                     ~ "R"^2 == .(round(lightTCO2R2,4))))))+
+      geom_smooth(method="lm", se=F, colour = "#009E73")+
+      theme(plot.title = element_text(hjust = 0.5))
+    
+    photo_rates_plot <- plot_grid(photo.O2.fig, photo.TCO2.fig, label_size = 12, scale=0.85)
+    photo_rates_plot
+    
+  }else{
+    
+    photo.O2.fig
+    
+  }
+}
+
+```
+
+
+```{r, echo=FALSE, results = 'hide', message=FALSE, eval = (exper == "Photo + Resp")}
+
+# Figure 2 (Respiration O2 and TCO2)
+if (!is.na(resp.data[1,2])) {
+  
+  if(!is.na(TAi)) {
+  figure2 <- Resp_rates_plot
+  } else{
+  figure2 <- resp.O2.fig
+  }
+  
+  setwd(paste0(wd,wd.dir))
+  
+  if(!is.na(TAi)) {
+  ggsave("Figure2_Respiration_PR.pdf", plot=figure2, width = 7, height = 3)
+  } else{
+  ggsave("Figure2_Respiration_PR.pdf", plot=figure2, width = 4.5, height = 3)
+  }
+  
+}
+
+
+# Figure 3 (Photosynthesis O2 and TCO2)
+if (!is.na(photo.data[1,2])) {
+  if(!is.na(TAi)) {
+  figure3 <- photo_rates_plot
+  } else{
+  figure3 <- photo.O2.fig
+  }
+  
+  setwd(paste0(wd,wd.dir))
+  
+  if(!is.na(TAi)) {
+  ggsave("Figure3_Photosynthesis_PR.pdf", plot=figure3, width = 7, height = 3)
+  } else{
+  ggsave("Figure3_Photosynthesis_PR.pdf", plot=figure3, width = 4.5, height = 3)
+  }
+  
+}  
+
+```
+
+<br/>
+
+
+## Calculated Rates and Regression Equations
+
+### Compiled table of O2 and TCO2 linear regression equations
+
+```{r, echo=FALSE, eval = (exper == "Photo + Resp")}
+
+# respiration rate
+if (!is.na(resp.data[1,2])) {
+  darkO2rate <-  ((darkO2coef[2,1] / SA) * volume) * 60 * 1000
+} else {
+  darkO2coef <- matrix(NA, nrow = 2, ncol = 2)
+  darkTCO2coef <- matrix(NA, nrow = 2, ncol = 2)
+  darkO2R2 <- NA
+  darkTCO2R2 <- NA
+  darkO2rate <- NA
+  darkTCO2rate <- NA
+}
+
+# photosynthesis rate
+if (!is.na(photo.data[1,2])) {
+  lightO2rate <- ((lightO2coef[2,1] / SA) * volume) * 60 * 1000
+} else {
+  lightO2coef <- matrix(NA, nrow = 2, ncol = 2)
+  lightTCO2coef <- matrix(NA, nrow = 2, ncol = 2)
+  lightO2R2 <- NA
+  lightTCO2R2 <- NA
+  lightO2rate <- NA
+  lightTCO2rate <- NA
+}
+
+
+
+# create table of all the variables
+if(!is.na(TAi)) {
+  
+    if (!is.na(resp.data[1,2])) {
+    darkTCO2rate <- ((darkTCO2coef[2,1] / SA) * volume) * 60 * 1000 * -1
+  }
+  
+  if (!is.na(photo.data[1,2])) {
+    lightTCO2rate <- ((lightTCO2coef[2,1] / SA) * volume) * 60 * 1000 * -1
+  }
+  
+  reg.table <- data.frame("filename" = filename, 
+                          "parameter" = c("O2", "TCO2", "O2", "TCO2"), 
+                          "light" = c("dark", "dark", "light", "light"), 
+                          "slope" = c(darkO2coef[2,1], darkTCO2coef[2,1], lightO2coef[2,1], lightTCO2coef[2,1]), 
+                          "intercept" = c(darkO2coef[1,1], darkTCO2coef[1,1], lightO2coef[1,1], lightTCO2coef[1,1]),
+                          "R2" = c(darkO2R2, darkTCO2R2, lightO2R2, lightTCO2R2), 
+                          "rate" = c(darkO2rate, darkTCO2rate, lightO2rate , lightTCO2rate))
+
+  reg.table$rate <- round(reg.table$rate, 1)
+  names(reg.table)[7]<-"calculated rate (nMol/cm2/h)"
+
+} else {
+  
+reg.table <- data.frame("filename" = filename, 
+                        "parameter" = c("O2", "O2"), 
+                        "light" = c("dark", "light"), 
+                        "slope" = c(darkO2coef[2,1], lightO2coef[2,1]), 
+                        "intercept" = c(darkO2coef[1,1], lightO2coef[1,1]),
+                        "R2" = c(darkO2R2, lightO2R2), 
+                        "rate" = c(darkO2rate, lightO2rate))
+
+  names(reg.table)[7]<-"calculated rate (nMol/cm2/h)"
+
+}
+
+
+reg.table$slope <- format(round(as.numeric(reg.table$slope), 2), scientific=FALSE)
+reg.table$intercept <- format(round(as.numeric(reg.table$intercept), 2), scientific=FALSE)
+reg.table$R2 <- round(reg.table$R2, 3)
+reg.table$`calculated rate (nMol/cm2/h)` <- format(round(as.numeric(reg.table$`calculated rate (nMol/cm2/h)`), 2), scientific=FALSE)
+
+
+kable(reg.table) %>%
+  kable_styling(font_size = 12, full_width = F)
+
+```
+
+<br/>
+
+
+### Light calcification rate:
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, eval = (exper == "Photo + Resp")}
+
+if(!is.na(TAi)) {
+calc.rate <- (((((delTA / 2) * volume) / Ltime) * 60) / SA) * -1000
+calc.rate <- round(calc.rate, 1)
+ # nmol cm-2 h-1 
+}
+
+```
+
+<br/>
+
+#### <font color='#D55E00'>`r ifelse(!is.na(TAi), print(paste("**Rate:** ", calc.rate, " nmol cm^-2^ h ^-1^")), print("*No total alkalinity values (initial and final) were supplied so value was not calculated.*"))`</font> 
+
+
+```{r save final PR .xlsx file, echo=FALSE, warning=FALSE, message=FALSE, eval = (exper == "Photo + Resp")}
+
+## Only save figures if this is a PR run:
+if(exper == "Photo + Resp") {
+  
+  # Save the workup data as a .xlsx (file name will be: filename_metadata_currentdate.xlsx)
+  data.s <- data %>%  select(`Step No.`, ` Time(m)`, ` Total T(m)`, ` O2 percent Sat.`, ` O2 (umol/kg)`, ` ISFET pH`, ` ISFET Temp`, `Light`,   `corrected pH`, ` corrected O2 (uMol/kg)`)
+  
+  # round values before saving final spreadsheet
+  data.s$` Time(m)` <- round(data.s$` Time(m)`, 3)
+  data.s$` Total T(m)` <- round(data.s$` Total T(m)`, 3)
+  data.s$` ISFET pH` <- round(data.s$` ISFET pH`, 3)
+  data.s$` ISFET Temp` <- round(data.s$` ISFET Temp`, 1)
+  data.s$`corrected pH` <- round(data.s$`corrected pH`, 3)
+  
+  # set working directory 
+  setwd(paste0(wd,wd.dir))
+  
+  ### Create workbook
+  wb <- createWorkbook()
+
+  # add 'Analyzed CISME Data' worksheet
+  addWorksheet(wb, "Analyzed CISME Data") 
+  writeData(wb, sheet = 1, x = data.s)
+  setColWidths(wb, sheet = 1, cols = 1:17, widths = "auto")
+  
+  # add 'Regression Table' worksheet
+  addWorksheet(wb, "Regression Table") 
+  writeData(wb, sheet = 2, x = reg.table)
+  setColWidths(wb, sheet = 2, cols = 1:7, widths = "auto")
+  
+  # establigh file name 
+  xlsxFileName <- paste(filename, date, sep="_") 
+  xlsxFileName <- paste(xlsxFileName, ".xlsx", sep="")
+  
+  # save workbook
+  saveWorkbook(wb, file=xlsxFileName, overwrite = TRUE)
+  
+}
+
+```
+
+<br/>
+
+
+`r if(exper != "Photo + Resp") {"\\end{comment}"}`
+
+---
+
+## Questions?
+#### If you have any questions about running this code, please contact Colleen Bove (colleenbove@gmail.com) for assistance.
+<font color='#009999'>This script for QUBIT Systems CISME: Community In Situ Metabolism was written by Colleen B. Bove.</font> 
+
+<br/>
+
+### Session Information
+*Script was last updated on 16 May 2022*
+```{r, echo = FALSE}
+
+sessionInfo()
+
+```
+
